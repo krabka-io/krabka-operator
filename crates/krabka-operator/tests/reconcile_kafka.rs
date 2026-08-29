@@ -755,7 +755,7 @@ async fn kafka_inline_logging_renders_rust_log_key() {
     let observed = state.take_observed();
     let data = configmap_data(&observed);
     assert!(
-        data["rust.log"].as_str() == Some("krabka_broker=debug,info"),
+        data["rust.log"].as_str() == Some("info,krabka_broker=debug"),
         "rust.log must carry the composed filter, data = {data}"
     );
 

@@ -252,7 +252,7 @@ mod tests {
             ("krabka_broker", "debug"),
         ]))
         .unwrap();
-        assert!(f == "krabka_broker=debug,krabka_raft=warn,info");
+        assert!(f == "info,krabka_broker=debug,krabka_raft=warn");
     }
 
     #[test]
@@ -265,7 +265,7 @@ mod tests {
             ("krabka_raft", "OFF"),
         ]))
         .unwrap();
-        assert!(f == "krabka_broker=warn,krabka_log=error,krabka_raft=off,info");
+        assert!(f == "info,krabka_broker=warn,krabka_log=error,krabka_raft=off");
     }
 
     #[test]
