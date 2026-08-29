@@ -6,12 +6,12 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Kubernetes operator for Crabka clusters"
+description = "Kubernetes operator for Krabka clusters"
 repository = "https://github.com/krabka-io/krabka-operator"
 homepage = "https://github.com/krabka-io/krabka-operator"
 documentation = "https://docs.rs/krabka-operator"
 readme = "README.md"
-keywords = ["kafka", "kubernetes", "operator", "crabka"]
+keywords = ["kafka", "kubernetes", "operator", "krabka"]
 categories = ["config", "network-programming"]
 
 [[bin]]
@@ -27,18 +27,18 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { workspace = true, features = ["env"] }
-crabka-client-admin = { version = "0.4.0" }
-crabka-client-core = { version = "0.4" }
-crabka-client-producer = { version = "0.4.0" }
-crabka-broker = { version = "0.4.0" }
-crabka-compression = { version = "0.4.0" }
-crabka-kraft-core = { version = "0.4.0" }
-crabka-logfmt = { version = "0.4.0" }
-crabka-metadata = { version = "0.4.0" }
-crabka-object-store = { version = "0.4.0" }
-crabka-schema-serde = { version = "0.4.0" }
-crabka-security = { workspace = true }
-crabka-units = { workspace = true }
+krabka-client-admin = { version = "0.4.0" }
+krabka-client-core = { version = "0.4" }
+krabka-client-producer = { version = "0.4.0" }
+krabka-broker = { version = "0.4.0" }
+krabka-compression = { version = "0.4.0" }
+krabka-kraft-core = { version = "0.4.0" }
+krabka-logfmt = { version = "0.4.0" }
+krabka-metadata = { version = "0.4.0" }
+krabka-object-store = { version = "0.4.0" }
+krabka-schema-serde = { version = "0.4.0" }
+krabka-security = { workspace = true }
+krabka-units = { workspace = true }
 base64 = { workspace = true }
 bytes = { workspace = true }
 derive_more = { workspace = true }

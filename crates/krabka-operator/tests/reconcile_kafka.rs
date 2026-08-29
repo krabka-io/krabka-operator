@@ -411,7 +411,7 @@ async fn kafka_applies_service_configmap_secret_no_statefulset() {
     let mut ctx = fixture_ctx(mock_client(&state, "y"), "y");
     Arc::get_mut(&mut ctx.config)
         .expect("fixture owns operator config")
-        .controller_dependency_requeue = crabka_units::millis(1_234);
+        .controller_dependency_requeue = krabka_units::millis(1_234);
     let kafka = kafka_cr("demo", "y");
 
     let action = reconcile(Arc::new(kafka), Arc::new(ctx)).await.unwrap();
@@ -743,7 +743,7 @@ async fn kafka_inline_logging_renders_rust_log_key() {
         r#type: LoggingType::Inline,
         loggers: [
             ("root".to_string(), "info".to_string()),
-            ("crabka_broker".to_string(), "debug".to_string()),
+            ("krabka_broker".to_string(), "debug".to_string()),
         ]
         .into(),
         value_from: None,
@@ -755,7 +755,7 @@ async fn kafka_inline_logging_renders_rust_log_key() {
     let observed = state.take_observed();
     let data = configmap_data(&observed);
     assert!(
-        data["rust.log"].as_str() == Some("crabka_broker=debug,info"),
+        data["rust.log"].as_str() == Some("krabka_broker=debug,info"),
         "rust.log must carry the composed filter, data = {data}"
     );
 
@@ -802,7 +802,7 @@ async fn kafka_external_logging_reads_user_configmap() {
                 "apiVersion": "v1",
                 "kind": "ConfigMap",
                 "metadata": { "name": "my-log-cm", "namespace": "y", "uid": "ext-cm" },
-                "data": { "rust.log": "crabka_raft=trace,warn" }
+                "data": { "rust.log": "krabka_raft=trace,warn" }
             }),
         ),
     });
@@ -824,7 +824,7 @@ async fn kafka_external_logging_reads_user_configmap() {
     let observed = state.take_observed();
     let data = configmap_data(&observed);
     assert!(
-        data["rust.log"].as_str() == Some("crabka_raft=trace,warn"),
+        data["rust.log"].as_str() == Some("krabka_raft=trace,warn"),
         "rust.log must mirror the external ConfigMap value, data = {data}"
     );
     let cond = logging_condition(&observed);
@@ -896,13 +896,13 @@ async fn broker_tuning_renders_runtime_toml_in_declaration_order() {
     let (ctx, state) = build_ctx("y", happy_path_rules("demo", "y", &items));
     let mut kafka = kafka_cr("demo", "y");
     kafka.spec.broker_tuning = Some(BrokerTuning {
-        cleaner_interval: Some(crabka_units::secs(7)),
-        isr_scan_interval: Some(crabka_units::millis(800)),
-        opa_http_timeout: Some(crabka_units::millis(2_500)),
-        auto_join_voter_request_timeout: Some(crabka_units::secs(4)),
-        replication_fetch_max: Some(crabka_units::mebibytes(2)),
-        replication_fetch_max_wait: Some(crabka_units::millis(750)),
-        replication_fetch_min: Some(crabka_units::bytes(2)),
+        cleaner_interval: Some(krabka_units::secs(7)),
+        isr_scan_interval: Some(krabka_units::millis(800)),
+        opa_http_timeout: Some(krabka_units::millis(2_500)),
+        auto_join_voter_request_timeout: Some(krabka_units::secs(4)),
+        replication_fetch_max: Some(krabka_units::mebibytes(2)),
+        replication_fetch_max_wait: Some(krabka_units::millis(750)),
+        replication_fetch_min: Some(krabka_units::bytes(2)),
         share_state_replication_factor: Some(2),
         transaction_state_replication_factor: Some(3),
         streams_internal_topic_replication_factor: Some(2),
@@ -948,7 +948,7 @@ async fn empty_broker_tuning_omits_runtime_section() {
 #[test]
 fn broker_tuning_rejects_zero_with_camel_case_path() {
     let tuning = BrokerTuning {
-        cleaner_interval: Some(crabka_units::millis(0)),
+        cleaner_interval: Some(krabka_units::millis(0)),
         ..BrokerTuning::default()
     };
 
@@ -959,7 +959,7 @@ fn broker_tuning_rejects_zero_with_camel_case_path() {
 #[test]
 fn broker_tuning_rejects_voter_timeout_above_wire_limit() {
     let tuning = BrokerTuning {
-        auto_join_voter_request_timeout: Some(crabka_units::millis(2_147_483_648)),
+        auto_join_voter_request_timeout: Some(krabka_units::millis(2_147_483_648)),
         ..BrokerTuning::default()
     };
 
@@ -972,7 +972,7 @@ fn broker_tuning_rejects_voter_timeout_above_wire_limit() {
 #[test]
 fn broker_tuning_rejects_fractional_protocol_milliseconds() {
     let tuning = BrokerTuning {
-        replication_fetch_max_wait: Some(crabka_units::micros(1_500)),
+        replication_fetch_max_wait: Some(krabka_units::micros(1_500)),
         ..BrokerTuning::default()
     };
 
@@ -998,8 +998,8 @@ fn broker_tuning_rejects_zero_streams_internal_topic_replication_factor() {
 #[test]
 fn broker_tuning_rejects_initial_backoff_above_cap() {
     let tuning = BrokerTuning {
-        replication_reconnect_initial_delay: Some(crabka_units::millis(500)),
-        replication_reconnect_delay_cap: Some(crabka_units::millis(100)),
+        replication_reconnect_initial_delay: Some(krabka_units::millis(500)),
+        replication_reconnect_delay_cap: Some(krabka_units::millis(100)),
         ..BrokerTuning::default()
     };
 
@@ -1053,7 +1053,7 @@ async fn invalid_broker_tuning_sets_condition_and_skips_configmap() {
     let (ctx, state) = build_ctx("y", rules);
     let mut kafka = kafka_cr("demo", "y");
     kafka.spec.broker_tuning = Some(BrokerTuning {
-        cleaner_interval: Some(crabka_units::millis(0)),
+        cleaner_interval: Some(krabka_units::millis(0)),
         ..BrokerTuning::default()
     });
 

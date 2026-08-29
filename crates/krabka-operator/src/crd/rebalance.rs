@@ -12,7 +12,7 @@
 //! state is `Ready` or `NotReady`. The `refresh` value computes the
 //! proposal again. The `stop` value cancels an execution that runs.
 
-use crabka_units::ByteRate;
+use krabka_units::ByteRate;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -46,7 +46,7 @@ pub struct KafkaRebalanceSpec {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        with = "crabka_units::serde_units::numeric::option_bytes_per_sec_i64"
+        with = "krabka_units::serde_units::numeric::option_bytes_per_sec_i64"
     )]
     #[schemars(with = "Option<i64>", range(min = 1))]
     pub throttle_bytes_per_sec: Option<ByteRate>,
@@ -121,7 +121,7 @@ pub struct KafkaRebalanceStatus {
 #[cfg(test)]
 mod tests {
     use assert2::{assert, check};
-    use crabka_units::{bytes_per_sec, mebibytes_per_sec};
+    use krabka_units::{bytes_per_sec, mebibytes_per_sec};
     use kube::CustomResourceExt as _;
 
     use super::*;

@@ -146,7 +146,7 @@ async fn mtls_internal_listener_renders_client_auth_required() {
 
     for needle in [
         "protocol = \"Ssl\"",
-        "client_ca_path = \"/etc/crabka/clients-ca/ca.crt\"",
+        "client_ca_path = \"/etc/krabka/clients-ca/ca.crt\"",
         "client_auth = \"Required\"",
     ] {
         assert!(
@@ -379,7 +379,7 @@ fn assert_nodeport_san_digest(
     ext_node_ip: &str,
 ) {
     use base64::Engine as _;
-    use crabka_security::ca::SubjectAltName;
+    use krabka_security::ca::SubjectAltName;
     // Find the keystore PATCH.
     let ks_patch = observed
         .iter()

@@ -447,7 +447,7 @@ fn cleared_version_status() -> serde_json::Value {
 /// and `tls_trusted_certificates`. The test captures the `StatefulSet` PATCH
 /// body. It asserts that the body contains the `oauth-jwks-trust` pod volume,
 /// which sources `<parent>-oauth-jwks-trust`, and the matching `volumeMount`
-/// at `/etc/crabka/oauth-jwks-trust` with readOnly.
+/// at `/etc/krabka/oauth-jwks-trust` with readOnly.
 #[tokio::test]
 async fn statefulset_mounts_oauth_jwks_trust_secret_when_trust_certs_present() {
     let rules = pool_reconcile_rules(
@@ -500,7 +500,7 @@ async fn statefulset_mounts_oauth_jwks_trust_secret_when_trust_certs_present() {
         .find(|m| m["name"] == "oauth-jwks-trust")
         .unwrap_or_else(|| panic!("oauth-jwks-trust mount present; body = {body}"));
     assert!(
-        trust_mount["mountPath"] == "/etc/crabka/oauth-jwks-trust",
+        trust_mount["mountPath"] == "/etc/krabka/oauth-jwks-trust",
         "mount path contract; body = {body}"
     );
     assert!(

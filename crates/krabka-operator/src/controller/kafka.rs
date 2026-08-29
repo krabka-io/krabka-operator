@@ -19,7 +19,6 @@ use std::{
     sync::Arc,
 };
 
-use crabka_units::{Time, secs};
 use futures::StreamExt as _;
 use k8s_openapi::{
     ByteString,
@@ -30,6 +29,7 @@ use k8s_openapi::{
     },
     apimachinery::pkg::apis::meta::v1::ObjectMeta,
 };
+use krabka_units::{Time, secs};
 use kube::{
     Resource, ResourceExt as _,
     api::{Api, ListParams, Patch, PatchParams},
@@ -297,11 +297,11 @@ fn controller_tls_per_node(nodes: &[NodeInfo]) -> BTreeMap<i32, listeners::Broke
                 id,
                 listeners::BrokerTlsRender {
                     controller_listener_protocol: "Ssl".into(),
-                    cert_path: format!("/etc/crabka/broker-tls/{id}.crt"),
-                    key_path: format!("/etc/crabka/broker-tls/{id}.key"),
-                    client_ca_path: "/etc/crabka/cluster-ca/ca.crt".into(),
+                    cert_path: format!("/etc/krabka/broker-tls/{id}.crt"),
+                    key_path: format!("/etc/krabka/broker-tls/{id}.key"),
+                    client_ca_path: "/etc/krabka/cluster-ca/ca.crt".into(),
                     client_auth: "Required".into(),
-                    trust_roots_path: "/etc/crabka/cluster-ca/ca.crt".into(),
+                    trust_roots_path: "/etc/krabka/cluster-ca/ca.crt".into(),
                 },
             )
         })
@@ -556,7 +556,7 @@ pub(crate) fn oauth_introspection_secret_mount(kafka: &Kafka) -> Option<OauthInt
 ///
 /// `key` is the source key of the user. The operator mounts it with
 /// projected items to a fixed path, so that the broker reads
-/// `/etc/crabka/gssapi-keytab/keytab` whatever the key name is.
+/// `/etc/krabka/gssapi-keytab/keytab` whatever the key name is.
 pub(crate) struct GssapiKeytabMount {
     pub secret_name: String,
     pub key: String,
@@ -1435,7 +1435,7 @@ async fn prepare_listener_tls(
     )
     .await?;
     let mut load_balancer_pending = Vec::new();
-    let extra_sans: BTreeMap<i32, Vec<crabka_security::ca::SubjectAltName>> = inventory
+    let extra_sans: BTreeMap<i32, Vec<krabka_security::ca::SubjectAltName>> = inventory
         .brokers
         .iter()
         .filter_map(|broker| {
@@ -1467,13 +1467,13 @@ async fn prepare_listener_tls(
             broker_id: node.broker_id,
             cn: node.pod_name.clone(),
             sans: vec![
-                crabka_security::ca::SubjectAltName::Dns(node.pod_fqdn.clone()),
-                crabka_security::ca::SubjectAltName::Dns(node.pod_name.clone()),
-                crabka_security::ca::SubjectAltName::Dns(format!(
+                krabka_security::ca::SubjectAltName::Dns(node.pod_fqdn.clone()),
+                krabka_security::ca::SubjectAltName::Dns(node.pod_name.clone()),
+                krabka_security::ca::SubjectAltName::Dns(format!(
                     "{}-broker-headless.{}.svc.cluster.local",
                     input.name, input.namespace
                 )),
-                crabka_security::ca::SubjectAltName::Ip(std::net::IpAddr::V4(
+                krabka_security::ca::SubjectAltName::Ip(std::net::IpAddr::V4(
                     std::net::Ipv4Addr::LOCALHOST,
                 )),
             ],
@@ -1492,7 +1492,7 @@ async fn prepare_listener_tls(
         .effective_listeners
         .iter()
         .any(|listener| matches!(listener.authentication, Some(ListenerAuthentication::Tls)))
-        .then_some("/etc/crabka/clients-ca/ca.crt");
+        .then_some("/etc/krabka/clients-ca/ca.crt");
     Ok(ListenerTlsArtifacts {
         per_node: controller_tls_per_node(&inventory.all),
         inventory,
@@ -1905,8 +1905,8 @@ fn evaluate_kafka_version(obj: &Kafka) -> (KafkaCondition, Option<String>) {
 }
 
 fn metadata_version_level(version: &str) -> Option<i16> {
-    crabka_metadata::metadata_version::from_version_string(version)
-        .map(crabka_metadata::metadata_version::MetadataVersion::feature_level)
+    krabka_metadata::metadata_version::from_version_string(version)
+        .map(krabka_metadata::metadata_version::MetadataVersion::feature_level)
 }
 
 async fn reconcile_metadata_version(
@@ -2272,7 +2272,7 @@ async fn emit_weak_auth_event(
             type_: "Warning",
             reason: "WeakAuth",
             message,
-            generate_name: "crabka-listener-auth-",
+            generate_name: "krabka-listener-auth-",
             action: "ListenerValidation",
             reporting_component: "krabka-operator/listener-auth-check",
         },
@@ -2299,7 +2299,7 @@ async fn emit_ca_rotation_refused_event(
             type_: "Warning",
             reason: "CaRotationRefused",
             message,
-            generate_name: "crabka-ca-rotation-",
+            generate_name: "krabka-ca-rotation-",
             action: "CaRotation",
             reporting_component: "krabka-operator/ca-rotation",
         },

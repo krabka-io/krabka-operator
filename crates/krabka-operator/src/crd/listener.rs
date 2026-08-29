@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crabka_units::Time;
+use krabka_units::Time;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -178,7 +178,7 @@ pub struct ListenerAuthenticationOAuth {
     ///     'kafka-broker'.
     /// CRD-validated `minLength: 1` when set.
     ///
-    /// Note: Strimzi uses Jayway `JsonPath` syntax, `$[?(@.x == 'y')]`. Crabka
+    /// Note: Strimzi uses Jayway `JsonPath` syntax, `$[?(@.x == 'y')]`. Krabka
     /// uses RFC 9535, `$[?@.x == 'y']`, which has no parens. Operators that
     /// migrate from Strimzi must rewrite their expressions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -285,8 +285,8 @@ pub struct ListenerAuthenticationOAuth {
     /// splits the string. The operator attaches the result to the Kafka
     /// principal for broker-side authorization. CRD-validated `minLength: 1`.
     ///
-    /// Note: Strimzi uses Jayway `JsonPath`, `$[?(@.x == 'y')]`. Crabka uses
-    /// RFC 9535, `$[?@.x == 'y']`, which has no parens, because Crabka uses
+    /// Note: Strimzi uses Jayway `JsonPath`, `$[?(@.x == 'y')]`. Krabka uses
+    /// RFC 9535, `$[?@.x == 'y']`, which has no parens, because Krabka uses
     /// `jsonpath-rust`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups_claim: Option<String>,
@@ -384,7 +384,7 @@ pub struct ListenerAuthenticationGssapi {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        with = "crabka_units::serde_units::human::option_time"
+        with = "krabka_units::serde_units::human::option_time"
     )]
     #[schemars(with = "Option<String>")]
     pub max_time_skew: Option<Time>,
@@ -1451,7 +1451,7 @@ mod tests {
         let ListenerAuthentication::Gssapi(gssapi) = listener.authentication.unwrap() else {
             panic!("expected gssapi authentication");
         };
-        assert!(gssapi.max_time_skew == Some(crabka_units::secs(17)));
+        assert!(gssapi.max_time_skew == Some(krabka_units::secs(17)));
 
         let schema = serde_json::to_string(&schemars::schema_for!(Listener)).unwrap();
         assert!(schema.contains("maxTimeSkew"));

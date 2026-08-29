@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crabka_client_admin::{AdminClient, AdminClientLike};
+use krabka_client_admin::{AdminClient, AdminClientLike};
 use kube::Client;
 use tokio::sync::Mutex;
 
@@ -65,11 +65,18 @@ impl Context {
         }
     }
 
+    /// Returns the cached admin client for `cluster` at `bootstrap`, connecting
+    /// one on a cache miss.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configured dispatch-queue capacity or frame max
+    /// is out of range, or if the connection to `bootstrap` fails.
     pub async fn admin_client_for(
         &self,
         cluster: &str,
         bootstrap: &str,
-    ) -> Result<AdminClientHandle, crabka_client_admin::AdminError> {
+    ) -> Result<AdminClientHandle, krabka_client_admin::AdminError> {
         let mut map = self.admin_clients.lock().await;
         let key = format!("{cluster}\0{bootstrap}");
         if let Some(client) = map.get(&key).or_else(|| map.get(cluster)) {
@@ -77,16 +84,16 @@ impl Context {
         }
         let admin = AdminClient::connect_with_options(
             &[bootstrap.to_string()],
-            crabka_client_core::ConnectionOptions {
-                dispatch_queue_capacity: crabka_client_core::ConnectionDispatchQueueCapacity::new(
+            krabka_client_core::ConnectionOptions {
+                dispatch_queue_capacity: krabka_client_core::ConnectionDispatchQueueCapacity::new(
                     self.config.client_dispatch_queue_capacity,
                 )
-                .map_err(crabka_client_admin::AdminError::Protocol)?,
-                frame_max: crabka_client_core::ClientFrameMax::try_from(
+                .map_err(krabka_client_admin::AdminError::Protocol)?,
+                frame_max: krabka_client_core::ClientFrameMax::try_from(
                     self.config.client_frame_max,
                 )
-                .map_err(crabka_client_admin::AdminError::Protocol)?,
-                ..crabka_client_core::ConnectionOptions::default()
+                .map_err(krabka_client_admin::AdminError::Protocol)?,
+                ..krabka_client_core::ConnectionOptions::default()
             },
         )
         .await?;

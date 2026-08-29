@@ -615,14 +615,14 @@ async fn config_diff_sets_and_deletes() {
     let has_set_bar = ops.iter().any(|op| {
         matches!(
             op,
-            crabka_client_admin::IncrementalAlterOp::Set { topic, key, value }
+            krabka_client_admin::IncrementalAlterOp::Set { topic, key, value }
                 if topic == TOPIC_NAME && key == "bar" && value == "2"
         )
     });
     let has_delete_foo = ops.iter().any(|op| {
         matches!(
             op,
-            crabka_client_admin::IncrementalAlterOp::Delete { topic, key }
+            krabka_client_admin::IncrementalAlterOp::Delete { topic, key }
                 if topic == TOPIC_NAME && key == "foo"
         )
     });

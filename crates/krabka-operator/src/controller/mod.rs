@@ -1,4 +1,4 @@
-//! Controllers, also called reconcilers, for Crabka CRDs.
+//! Controllers, also called reconcilers, for Krabka CRDs.
 //!
 //! Each kind is in its own submodule. The submodules share helpers from
 //! `common`: cluster-level rendering, SSA helpers, label and owner-ref

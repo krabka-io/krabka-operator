@@ -8,7 +8,6 @@
 use std::sync::Arc;
 
 use assert2::assert;
-use crabka_units::{bytes, millis, secs};
 use http::Method;
 use krabka_operator::{
     controller::{common::ReconcileError, schema_registry::reconcile},
@@ -17,6 +16,7 @@ use krabka_operator::{
         SchemaRegistryHealthChecks, SchemaRegistryRuntime, SchemaRegistrySpec,
     },
 };
+use krabka_units::{bytes, millis, secs};
 
 #[path = "shared/mod.rs"]
 mod shared;
@@ -391,7 +391,7 @@ async fn kafka_present_but_not_ready_gates_with_no_children() {
     let mut ctx = fixture_ctx(client, NS);
     Arc::get_mut(&mut ctx.config)
         .expect("fixture owns operator config")
-        .controller_dependency_requeue = crabka_units::millis(1_234);
+        .controller_dependency_requeue = krabka_units::millis(1_234);
 
     let action = reconcile(Arc::new(sr("sr1", Some(CLUSTER))), Arc::new(ctx))
         .await

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crabka_units::{Time, convert::TimeExt as _};
+use krabka_units::{Time, convert::TimeExt as _};
 use prometheus_client::{
     encoding::EncodeLabelSet,
     metrics::{counter::Counter, family::Family, gauge::Gauge, histogram::Histogram},
@@ -163,7 +163,7 @@ pub fn init_tracing(filter: &str) {
     let env = tracing_subscriber::EnvFilter::try_new(filter)
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     let _ = tracing_subscriber::registry()
-        .with(crabka_logfmt::layer(env, std::io::stdout))
+        .with(krabka_logfmt::layer(env, std::io::stdout))
         .try_init();
 }
 
@@ -188,7 +188,7 @@ pub fn new_registry_with_metrics() -> (Registry, ControllerMetrics) {
 #[cfg(test)]
 mod tests {
     use assert2::assert;
-    use crabka_units::millis;
+    use krabka_units::millis;
 
     use super::*;
 

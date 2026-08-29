@@ -1,4 +1,4 @@
-//! Crabka Kubernetes operator library.
+//! Krabka Kubernetes operator library.
 //!
 //! The binary entry point is `src/main.rs`. This library exposes the reusable
 //! parts: controllers, CRD types, telemetry, and leader election. You can

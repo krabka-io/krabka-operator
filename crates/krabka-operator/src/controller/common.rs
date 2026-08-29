@@ -9,10 +9,6 @@
 
 use std::{collections::BTreeMap, fmt::Debug, future::Future, pin::Pin, sync::Arc};
 
-use crabka_units::{
-    Time,
-    convert::{StdDurationExt as _, TimeExt as _},
-};
 use k8s_openapi::{
     ByteString,
     api::{
@@ -20,6 +16,10 @@ use k8s_openapi::{
         core::v1::{ConfigMap, Secret, Service},
     },
     apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference},
+};
+use krabka_units::{
+    Time,
+    convert::{StdDurationExt as _, TimeExt as _},
 };
 use kube::{
     Resource,
@@ -47,7 +47,7 @@ pub(crate) const CONTROLLER_PORT: i32 = 9093;
 pub(crate) type AddressesPerNode =
     BTreeMap<i32, BTreeMap<String, crate::controller::listeners::AdvertisedAddress>>;
 pub(crate) type RolesPerNode = BTreeMap<i32, Vec<crate::crd::NodeRole>>;
-pub(crate) const APP_LABEL: &str = "crabka-broker";
+pub(crate) const APP_LABEL: &str = "krabka-broker";
 pub(crate) const QUORUM_BOOTSTRAP_NODE_ID_KEY: &str = "quorumBootstrapNodeId";
 pub(crate) const QUORUM_BOOTSTRAP_POOL_KEY: &str = "quorumBootstrapPool";
 pub(crate) const QUORUM_BOOTSTRAP_INITIALIZED_KEY: &str = "quorumBootstrapInitialized";
@@ -98,7 +98,7 @@ pub enum ReconcileError {
     #[error("malformed input: {0}")]
     Malformed(String),
     #[error("CA: {0}")]
-    Ca(#[from] crabka_security::ca::CaError),
+    Ca(#[from] krabka_security::ca::CaError),
     #[error("cert parse: {0}")]
     CertParse(String),
     #[error(
@@ -170,9 +170,9 @@ pub enum ReconcileError {
     #[error("gateway tuning: {0}")]
     GatewayConfigInvalid(String),
     #[error("producer error: {0}")]
-    Producer(#[from] crabka_client_producer::ProducerError),
+    Producer(#[from] krabka_client_producer::ProducerError),
     #[error("admin error: {0}")]
-    Admin(#[from] crabka_client_admin::AdminError),
+    Admin(#[from] krabka_client_admin::AdminError),
 }
 
 /// The controller chosen to seed a new dynamic `KRaft` quorum.
@@ -435,7 +435,7 @@ pub(crate) fn render_configmap(
         data.insert("rust.log".to_string(), filter.to_string());
     }
     // `metadata.version` is finalized via the bootstrap-seeded feature
-    // record (`crabka format --release-version`), not the broker config —
+    // record (`krabka format --release-version`), not the broker config —
     // so it is intentionally not rendered here. An explicit
     // `spec.metadataVersion` pin still rolls the cluster via the config
     // hash (see `combined_config_hash`), which is a separate channel.
@@ -1115,7 +1115,7 @@ pub(crate) fn plan_rollout(pools: &[PoolRolloutState], desired: &str) -> Vec<(St
 /// — we never round-trip back to a string, so sub-byte rounding from
 /// the `f64` intermediate is acceptable. The in-tree implementation
 /// is ~50 lines and saves a workspace dependency; no third-party
-/// Quantity parser is wired into Crabka yet.
+/// Quantity parser is wired into Krabka yet.
 ///
 /// # Errors
 ///
@@ -1315,7 +1315,7 @@ mod config_hash_tests {
         assert!(empty == absent, "empty tuning must preserve hash collapse");
 
         spec.broker_tuning = Some(BrokerTuning {
-            auto_join_voter_request_timeout: Some(crabka_units::secs(7)),
+            auto_join_voter_request_timeout: Some(krabka_units::secs(7)),
             ..BrokerTuning::default()
         });
         let nonempty = combined_config_hash(&spec, None, None, None);
