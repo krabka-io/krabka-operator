@@ -19,8 +19,8 @@
 
 use std::sync::Arc;
 
-use crabka_units::Time;
 use futures::StreamExt as _;
+use krabka_units::Time;
 use kube::{
     Resource, ResourceExt as _,
     api::{Api, Patch, PatchParams},
@@ -694,7 +694,7 @@ async fn remove_command_annotation(
 #[cfg(test)]
 mod tests {
     use assert2::assert;
-    use crabka_units::{minutes, secs};
+    use krabka_units::{minutes, secs};
 
     use super::*;
     use crate::{

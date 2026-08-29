@@ -200,7 +200,7 @@ fn fake_event_body(namespace: &str) -> serde_json::Value {
     serde_json::json!({
         "apiVersion": "v1",
         "kind": "Event",
-        "metadata": { "name": "crabka-listener-auth-abc", "namespace": namespace, "uid": "event-uid" },
+        "metadata": { "name": "krabka-listener-auth-abc", "namespace": namespace, "uid": "event-uid" },
         "involvedObject": {},
         "message": "test event",
         "reason": "WeakAuth",
@@ -640,7 +640,7 @@ async fn two_oauth_listeners_with_divergent_trust_certs_rejected_with_conflictin
 ///      the managed `{kafka}-oauth-jwks-trust` Secret with the concatenated
 ///      PEM under the key `ca.crt`;
 ///   2. make the broker-config `ConfigMap` render path emit
-///      `idp_tls_trust = "/etc/crabka/oauth-jwks-trust/ca.crt"` in
+///      `idp_tls_trust = "/etc/krabka/oauth-jwks-trust/ca.crt"` in
 ///      `broker-0.toml`, which is the T2 render-path wiring;
 ///   3. surface `ListenersValid=True` on the Kafka status, because the
 ///      reconcile path passed validation and trust assembly with no errors.
@@ -746,7 +746,7 @@ async fn oauth_listener_with_tls_trusted_certificates_reconciles_renders_idp_tls
     // (2) ConfigMap render contains the idp_tls_trust pointer.
     let toml = extract_broker0_toml(&observed, "c14");
     assert!(
-        toml.contains("idp_tls_trust = \"/etc/crabka/oauth-jwks-trust/ca.crt\""),
+        toml.contains("idp_tls_trust = \"/etc/krabka/oauth-jwks-trust/ca.crt\""),
         "broker-0.toml must reference the mounted trust bundle; TOML: {toml}"
     );
 

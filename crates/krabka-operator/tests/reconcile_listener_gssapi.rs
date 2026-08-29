@@ -9,7 +9,7 @@
 //!      broker-config `ConfigMap`. That block holds `keytab_path` and
 //!      `enabled_mechanisms = ["GSSAPI"]`. The pool reconciler mounts the
 //!      `gssapi-keytab` projected-items volume at
-//!      `/etc/crabka/gssapi-keytab`.
+//!      `/etc/krabka/gssapi-keytab`.
 //!   2. Missing keytab Secret. The cluster reconciler stops early and
 //!      writes a `Ready=False` status condition with reason
 //!      `MissingGssapiKeytabSecret`. This has the same shape as the OAuth
@@ -19,7 +19,7 @@
 //!      `ConfigMap` TOML gains the `[inter_broker_credentials]` block with
 //!      `type = "gssapi"` and the client principal.
 //!   4. krb5.conf. `spec.krb5ConfSecretRef` gives a `krb5-conf` volume, a
-//!      `/etc/crabka/krb5` mount, and a `KRB5_CONFIG` env on the broker
+//!      `/etc/krabka/krb5` mount, and a `KRB5_CONFIG` env on the broker
 //!      container. The tests assert on the `StatefulSet` from the pool
 //!      reconciler.
 //!
@@ -386,7 +386,7 @@ fn pool_ctx(
 ///
 /// The reconciler GETs the keytab Secret and validates it. The
 /// broker-config `ConfigMap` then holds the broker-global `[gssapi]` block
-/// with `keytab_path = "/etc/crabka/gssapi-keytab/keytab"`, and the
+/// with `keytab_path = "/etc/krabka/gssapi-keytab/keytab"`, and the
 /// per-listener row `sasl_config = { enabled_mechanisms = ["GSSAPI"] }`.
 #[tokio::test]
 async fn gssapi_listener_renders_gssapi_toml_block_and_mechanism() {
@@ -442,7 +442,7 @@ async fn gssapi_listener_renders_gssapi_toml_block_and_mechanism() {
     // listener is not gssapi, and there is no interBrokerKerberos.
     for (needle, want) in [
         ("[gssapi]", true),
-        ("keytab_path = \"/etc/crabka/gssapi-keytab/keytab\"", true),
+        ("keytab_path = \"/etc/krabka/gssapi-keytab/keytab\"", true),
         ("sasl_config = { enabled_mechanisms = [\"GSSAPI\"] }", true),
         ("[inter_broker_credentials]", false),
     ] {
@@ -457,7 +457,7 @@ async fn gssapi_listener_renders_gssapi_toml_block_and_mechanism() {
 
 /// The pool reconciler renders a pod template that mounts the keytab
 /// Secret as a projected-items `gssapi-keytab` volume at the fixed
-/// directory `/etc/crabka/gssapi-keytab`. The key of the user is pinned to
+/// directory `/etc/krabka/gssapi-keytab`. The key of the user is pinned to
 /// the item path `keytab`.
 #[tokio::test]
 async fn gssapi_listener_statefulset_mounts_keytab_volume() {
@@ -509,7 +509,7 @@ async fn gssapi_listener_statefulset_mounts_keytab_volume() {
         .find(|m| m["name"] == "gssapi-keytab")
         .unwrap_or_else(|| panic!("gssapi-keytab mount present; body = {body}"));
     assert!(
-        kt_mount["mountPath"] == "/etc/crabka/gssapi-keytab",
+        kt_mount["mountPath"] == "/etc/krabka/gssapi-keytab",
         "canonical keytab mount dir; body = {body}"
     );
 }
@@ -637,7 +637,7 @@ async fn rendered_gssapi_toml_round_trips_through_broker_file_config() {
                 ],
                 realm: Some("EXAMPLE.COM".into()),
                 kdc: Some("tcp://kdc:88".into()),
-                max_time_skew: Some(crabka_units::secs(17)),
+                max_time_skew: Some(krabka_units::secs(17)),
             },
         )),
         configuration: None,
@@ -657,7 +657,7 @@ async fn rendered_gssapi_toml_round_trips_through_broker_file_config() {
     let toml = extract_broker0_toml(&observed, "c5");
 
     // Parse through the REAL broker parser, then apply to a live BrokerConfig.
-    let mut fc: crabka_broker::file_config::FileConfig =
+    let mut fc: krabka_broker::file_config::FileConfig =
         toml::from_str(&toml).expect("broker parses operator-rendered gssapi TOML");
     // The operator now emits a `controller_quorum_voters` set of per-pod
     // headless FQDNs. `apply_to` DNS-resolves each voter (bounded retry),
@@ -665,7 +665,7 @@ async fn rendered_gssapi_toml_round_trips_through_broker_file_config() {
     // only exercises the gssapi/inter-broker-credentials render path, not
     // quorum wiring. Drop the voters so the round-trip stays hermetic.
     fc.controller_quorum_voters.clear();
-    let mut bc = crabka_broker::config::BrokerConfig::default();
+    let mut bc = krabka_broker::config::BrokerConfig::default();
     fc.apply_to(&mut bc)
         .expect("apply rendered gssapi TOML to BrokerConfig");
 
@@ -678,8 +678,8 @@ async fn rendered_gssapi_toml_round_trips_through_broker_file_config() {
     );
     check!(g.realm == Some("EXAMPLE.COM".into()));
     check!(g.kdc == Some("tcp://kdc:88".into()));
-    check!(g.max_time_skew == crabka_units::secs(17));
-    check!(g.keytab_path == std::path::PathBuf::from("/etc/crabka/gssapi-keytab/keytab"));
+    check!(g.max_time_skew == krabka_units::secs(17));
+    check!(g.keytab_path == std::path::PathBuf::from("/etc/krabka/gssapi-keytab/keytab"));
 
     // [inter_broker_credentials] survives as the Gssapi variant with the
     // shared client principal, service name, KDC URL, and keytab path.
@@ -688,8 +688,8 @@ async fn rendered_gssapi_toml_round_trips_through_broker_file_config() {
         .expect("bc.inter_broker_credentials must be Some after round trip");
     assert!(
         creds
-            == crabka_broker::config::InterBrokerCredentials::Gssapi {
-                keytab_path: std::path::PathBuf::from("/etc/crabka/gssapi-keytab/keytab"),
+            == krabka_broker::config::InterBrokerCredentials::Gssapi {
+                keytab_path: std::path::PathBuf::from("/etc/krabka/gssapi-keytab/keytab"),
                 client_principal: "kafka@EXAMPLE.COM".into(),
                 service_name: "kafka".into(),
                 kdc_url: "tcp://kdc:88".into(),
@@ -701,8 +701,8 @@ async fn rendered_gssapi_toml_round_trips_through_broker_file_config() {
 
 /// `spec.krb5ConfSecretRef` gives three things: a `krb5-conf` volume from
 /// the Secret of the user, with the key pinned to `krb5.conf`, a
-/// volumeMount on the broker container at `/etc/crabka/krb5`, and a
-/// `KRB5_CONFIG` env that points at `/etc/crabka/krb5/krb5.conf`.
+/// volumeMount on the broker container at `/etc/krabka/krb5`, and a
+/// `KRB5_CONFIG` env that points at `/etc/krabka/krb5/krb5.conf`.
 ///
 /// The test asserts on the `StatefulSet` that the pool reconciler renders,
 /// because that is the layer that mounts the volume and sets the env.
@@ -756,7 +756,7 @@ async fn krb5_conf_statefulset_mounts_volume_and_sets_env() {
         .find(|m| m["name"] == "krb5-conf")
         .unwrap_or_else(|| panic!("krb5-conf mount present; body = {body}"));
     assert!(
-        krb5_mount["mountPath"] == "/etc/crabka/krb5",
+        krb5_mount["mountPath"] == "/etc/krabka/krb5",
         "body = {body}"
     );
 
@@ -766,7 +766,7 @@ async fn krb5_conf_statefulset_mounts_volume_and_sets_env() {
         .find(|e| e["name"] == "KRB5_CONFIG")
         .unwrap_or_else(|| panic!("KRB5_CONFIG env present; body = {body}"));
     assert!(
-        krb5_config["value"] == "/etc/crabka/krb5/krb5.conf",
+        krb5_config["value"] == "/etc/krabka/krb5/krb5.conf",
         "KRB5_CONFIG must point at the mounted krb5.conf; body = {body}"
     );
 }

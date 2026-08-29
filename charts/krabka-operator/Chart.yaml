@@ -1,6 +1,6 @@
 apiVersion: v2
 name: krabka-operator
-description: Kubernetes operator for Crabka clusters
+description: Kubernetes operator for Krabka clusters
 type: application
 version: 0.1.0
 # appVersion tracks the crate release. CI (docs.yml) overrides both version and
@@ -13,8 +13,8 @@ sources:
   - https://github.com/krabka-io/krabka-operator
 keywords:
   - kafka
-  - crabka
+  - krabka
   - operator
 maintainers:
-  - name: The Crabka Authors
-icon: https://raw.githubusercontent.com/krabka-io/krabka-operator/main/docs/crabka-square.png
+  - name: The Krabka Authors
+icon: https://raw.githubusercontent.com/krabka-io/krabka-operator/main/docs/krabka-square.png

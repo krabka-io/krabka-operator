@@ -21,7 +21,7 @@
 //! The decode path below accepts all of these forms, and this is on
 //! purpose.
 
-use crabka_units::{
+use krabka_units::{
     ByteRate, Time,
     convert::{ByteRateExt as _, TimeExt as _},
 };
@@ -240,7 +240,7 @@ pub struct ConnectRebalancerClient {
     http: reqwest::Client,
 }
 
-const SERVICE_PATH: &str = "crabka.rebalancer.v1.Rebalancer";
+const SERVICE_PATH: &str = "krabka.rebalancer.v1.Rebalancer";
 
 /// Body of an `ExecuteProposal` request.
 ///
@@ -356,7 +356,7 @@ impl RebalancerClientLike for ConnectRebalancerClient {
 #[cfg(test)]
 mod tests {
     use assert2::assert;
-    use crabka_units::{bytes_per_sec, mebibytes_per_sec, millis, secs};
+    use krabka_units::{bytes_per_sec, mebibytes_per_sec, millis, secs};
 
     use super::*;
 

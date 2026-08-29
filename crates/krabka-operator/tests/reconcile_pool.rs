@@ -388,14 +388,14 @@ async fn multi_replica_pool_reconcile_renders_all_ordinals() {
             .as_array()
             .expect("broker env")
             .iter()
-            .any(|env| { env["name"] == "CRABKA_PROCESS_ROLES" && env["value"] == "controller" })
+            .any(|env| { env["name"] == "KRABKA_PROCESS_ROLES" && env["value"] == "controller" })
     );
     assert!(state.remaining_rules() == 0);
 }
 
 #[tokio::test]
 async fn controller_scale_down_removes_highest_voter_before_pods() {
-    use crabka_client_admin::{MetadataQuorum, QuorumReplica};
+    use krabka_client_admin::{MetadataQuorum, QuorumReplica};
 
     let parent = "demo";
     let pool_name = "controllers";
@@ -510,7 +510,7 @@ async fn concurrent_shrink_and_add_cannot_reuse_live_statefulset_node_ids() {
     let mut live = fake_sts_body("demo-controllers", namespace, 1, Some(1));
     live["metadata"]["labels"] = serde_json::json!({
         "app.kubernetes.io/instance": parent,
-        "app.kubernetes.io/name": "crabka-broker",
+        "app.kubernetes.io/name": "krabka-broker",
         "krabka.io/pool": "controllers",
     });
     live["metadata"]["annotations"] = serde_json::json!({
@@ -710,7 +710,7 @@ async fn broker_only_pool_becomes_ready_without_joining_quorum() {
             .as_array()
             .expect("broker env")
             .iter()
-            .any(|env| { env["name"] == "CRABKA_PROCESS_ROLES" && env["value"] == "broker" })
+            .any(|env| { env["name"] == "KRABKA_PROCESS_ROLES" && env["value"] == "broker" })
     );
     let status = observed
         .iter()
@@ -724,13 +724,13 @@ async fn broker_only_pool_becomes_ready_without_joining_quorum() {
 
 #[tokio::test]
 async fn pool_status_ready_when_sts_ready() {
-    use crabka_client_admin::{MetadataQuorum, QuorumReplica};
+    use krabka_client_admin::{MetadataQuorum, QuorumReplica};
 
     let state = MockState::new(happy_path_rules("demo", "brokers", "y", Some(1)));
     let mut ctx = fixture_ctx(mock_client(&state, "y"), "y");
     Arc::get_mut(&mut ctx.config)
         .expect("fixture owns operator config")
-        .controller_dependency_requeue = crabka_units::millis(1_234);
+        .controller_dependency_requeue = krabka_units::millis(1_234);
     let admin = shared::fake_admin::FakeAdminClient::new();
     admin.set_metadata_quorum(MetadataQuorum {
         leader_id: 0,
@@ -782,7 +782,7 @@ async fn pool_status_ready_when_sts_ready() {
 
 #[tokio::test]
 async fn deleting_pool_removes_exact_committed_voter() {
-    use crabka_client_admin::{MetadataQuorum, QuorumReplica};
+    use krabka_client_admin::{MetadataQuorum, QuorumReplica};
 
     let parent = "demo";
     let pool_name = "brokers";
@@ -862,7 +862,7 @@ async fn deleting_pool_removes_exact_committed_voter() {
 
 #[tokio::test]
 async fn deleting_pool_finishes_observed_downscale_voters_before_pods() {
-    use crabka_client_admin::{MetadataQuorum, QuorumReplica};
+    use krabka_client_admin::{MetadataQuorum, QuorumReplica};
 
     let parent = "demo";
     let pool_name = "controllers";
@@ -961,7 +961,7 @@ async fn deleting_pool_finishes_observed_downscale_voters_before_pods() {
 
 #[tokio::test]
 async fn deleting_last_voter_keeps_finalizer_and_reports_blocked() {
-    use crabka_client_admin::{MetadataQuorum, QuorumReplica};
+    use krabka_client_admin::{MetadataQuorum, QuorumReplica};
 
     let parent = "demo";
     let pool_name = "brokers";
@@ -1402,7 +1402,7 @@ async fn pool_storage_shrink_is_rejected() {
 
 /// A JBOD pool renders one `volumeClaimTemplate` per disk
 /// (`data` + `data-{id}`), a set-wide retention policy, and the broker
-/// container's `CRABKA_EXTRA_LOG_DIRS` env listing every non-primary disk.
+/// container's `KRABKA_EXTRA_LOG_DIRS` env listing every non-primary disk.
 #[tokio::test]
 async fn pool_jbod_renders_multiple_volume_claim_templates() {
     use krabka_operator::crd::{JbodSpec, JbodVolume, Storage};
@@ -1520,7 +1520,7 @@ async fn pool_jbod_renders_multiple_volume_claim_templates() {
         "body = {body}"
     );
 
-    // Broker container learns the extra disk via CRABKA_EXTRA_LOG_DIRS.
+    // Broker container learns the extra disk via KRABKA_EXTRA_LOG_DIRS.
     let containers = body["spec"]["template"]["spec"]["containers"]
         .as_array()
         .unwrap_or_else(|| panic!("containers present; body = {body}"));
@@ -1529,18 +1529,18 @@ async fn pool_jbod_renders_multiple_volume_claim_templates() {
         .unwrap_or_else(|| panic!("broker env present; body = {body}"));
     let extra = env
         .iter()
-        .find(|e| e["name"] == "CRABKA_EXTRA_LOG_DIRS")
-        .unwrap_or_else(|| panic!("CRABKA_EXTRA_LOG_DIRS env present; body = {body}"));
-    assert!(extra["value"] == "/var/lib/crabka/data-1", "body = {body}");
+        .find(|e| e["name"] == "KRABKA_EXTRA_LOG_DIRS")
+        .unwrap_or_else(|| panic!("KRABKA_EXTRA_LOG_DIRS env present; body = {body}"));
+    assert!(extra["value"] == "/var/lib/krabka/data-1", "body = {body}");
 
     assert!(state.remaining_rules() == 0);
 }
 
 /// The rendered `StatefulSet` must:
 ///   1. Include a `broker-config` `ConfigMap` volume in the pod template.
-///   2. Pass `--config-file=/run/crabka/broker.toml` in the broker container args.
-///   3. Mount the `ConfigMap` at `/etc/crabka/config` (readOnly) in the broker container.
-///   4. NOT include `CRABKA_ADVERTISED_LISTENER` in the broker container env.
+///   2. Pass `--config-file=/run/krabka/broker.toml` in the broker container args.
+///   3. Mount the `ConfigMap` at `/etc/krabka/config` (readOnly) in the broker container.
+///   4. NOT include `KRABKA_ADVERTISED_LISTENER` in the broker container env.
 #[tokio::test]
 async fn statefulset_mounts_broker_config_volume_and_uses_config_file() {
     let parent = "demo";
@@ -1640,7 +1640,7 @@ async fn statefulset_mounts_broker_config_volume_and_uses_config_file() {
         .collect::<Vec<_>>()
         .join(" ");
     assert!(
-        script.contains("--config-file=/run/crabka/broker.toml"),
+        script.contains("--config-file=/run/krabka/broker.toml"),
         "--config-file flag missing from broker args; args = {script}"
     );
     assert!(
@@ -1648,7 +1648,7 @@ async fn statefulset_mounts_broker_config_volume_and_uses_config_file() {
         "--listen-addr must not be present in broker args; args = {script}"
     );
 
-    // 3. Broker container must mount broker-config at /etc/crabka/config.
+    // 3. Broker container must mount broker-config at /etc/krabka/config.
     let volume_mounts = broker["volumeMounts"]
         .as_array()
         .unwrap_or_else(|| panic!("broker volumeMounts present; body = {body}"));
@@ -1657,24 +1657,24 @@ async fn statefulset_mounts_broker_config_volume_and_uses_config_file() {
         .find(|m| m["name"] == "broker-config")
         .unwrap_or_else(|| panic!("broker-config volumeMount missing; mounts = {volume_mounts:?}"));
     assert!(
-        config_mount["mountPath"] == "/etc/crabka/config",
-        "broker-config must mount at /etc/crabka/config; body = {body}"
+        config_mount["mountPath"] == "/etc/krabka/config",
+        "broker-config must mount at /etc/krabka/config; body = {body}"
     );
     assert!(
         config_mount["readOnly"] == serde_json::Value::Bool(true),
         "broker-config mount must be readOnly; body = {body}"
     );
 
-    // 4. CRABKA_ADVERTISED_LISTENER must not be in the broker container env.
+    // 4. KRABKA_ADVERTISED_LISTENER must not be in the broker container env.
     let env = broker["env"]
         .as_array()
         .unwrap_or_else(|| panic!("broker env present; body = {body}"));
     let has_advertised_listener = env
         .iter()
-        .any(|e| e["name"] == "CRABKA_ADVERTISED_LISTENER");
+        .any(|e| e["name"] == "KRABKA_ADVERTISED_LISTENER");
     assert!(
         !has_advertised_listener,
-        "CRABKA_ADVERTISED_LISTENER must not be in broker env (replaced by per-broker TOML); body = {body}"
+        "KRABKA_ADVERTISED_LISTENER must not be in broker env (replaced by per-broker TOML); body = {body}"
     );
 
     assert!(state.remaining_rules() == 0);

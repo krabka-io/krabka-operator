@@ -11,13 +11,13 @@
 
 use std::sync::Mutex as StdMutex;
 
-use crabka_units::ByteRate;
 use krabka_operator::{
     ids::{LeaderMovementCount, MaxLeadersCount, MaxReplicasCount, ReplicaMovementCount},
     rebalancer_client::{
         ProposalStatus, ProposalSummary, RebalancerClientLike, RebalancerError, RebalancerProposal,
     },
 };
+use krabka_units::ByteRate;
 
 /// One recorded Connect-RPC.
 #[derive(Debug, Clone, PartialEq)]

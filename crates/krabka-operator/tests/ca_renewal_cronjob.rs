@@ -3,7 +3,7 @@
 //!
 //! Each test fills the mock client with canned CA Secrets and
 //! broker-keystore Secrets, which hold real PEM material from
-//! `crabka_security::ca`. It then calls `run_renewal_check` and asserts on
+//! `krabka_security::ca`. It then calls `run_renewal_check` and asserts on
 //! the observed request log.
 
 use assert2::{assert, check};
@@ -11,11 +11,11 @@ use assert2::{assert, check};
 mod shared;
 
 use base64::Engine as _;
-use crabka_security::ca::{
-    SubjectAltName, generate_clients_ca, generate_cluster_ca, issue_broker_cert,
-};
 use http::{Method, Response};
 use krabka_operator::controller::cluster_ca::run_renewal_check;
+use krabka_security::ca::{
+    SubjectAltName, generate_clients_ca, generate_cluster_ca, issue_broker_cert,
+};
 use shared::{MockRule, MockState, json_response, mock_client, not_found_body};
 
 // ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ fn fake_event_body(namespace: &str) -> serde_json::Value {
     serde_json::json!({
         "apiVersion": "v1",
         "kind": "Event",
-        "metadata": { "name": "crabka-ca-renewal-abc", "namespace": namespace, "uid": "event-uid" },
+        "metadata": { "name": "krabka-ca-renewal-abc", "namespace": namespace, "uid": "event-uid" },
         "involvedObject": {},
         "message": "test event",
         "reason": "TestReason",

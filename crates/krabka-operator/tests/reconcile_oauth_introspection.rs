@@ -347,7 +347,7 @@ async fn oauth_introspection_jwt_mode_does_not_mount_anything() {
 /// source Secret as an `oauth-introspection-secret` volume. The projected
 /// `items[0]` mapping pins the user's key, `SOURCE_KEY` = "secret", to the
 /// fixed in-pod filename `client-secret`. The broker's rendered TOML
-/// references that path as `/etc/crabka/oauth-introspection/client-secret`.
+/// references that path as `/etc/krabka/oauth-introspection/client-secret`.
 #[tokio::test]
 async fn oauth_introspection_managed_pod_template_mounts_secret_with_projected_items() {
     let rules = pool_reconcile_rules(
@@ -484,7 +484,7 @@ async fn statefulset_mounts_oauth_introspection_secret_when_introspection_mode()
         .find(|m| m["name"] == "oauth-introspection-secret")
         .unwrap_or_else(|| panic!("oauth-introspection-secret mount present; body = {body}"));
     assert!(
-        intro_mount["mountPath"] == "/etc/crabka/oauth-introspection",
+        intro_mount["mountPath"] == "/etc/krabka/oauth-introspection",
         "canonical broker mount path (T3 contract); body = {body}"
     );
     assert!(

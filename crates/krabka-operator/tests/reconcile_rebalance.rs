@@ -8,7 +8,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use assert2::{assert, check};
-use crabka_units::mebibytes_per_sec;
 use http::{Method, Request};
 use hyper::body::Bytes;
 use krabka_operator::{
@@ -16,6 +15,7 @@ use krabka_operator::{
     crd::{KafkaCondition, KafkaRebalance, KafkaRebalanceSpec, KafkaRebalanceStatus},
     rebalancer_client::ProposalStatus,
 };
+use krabka_units::mebibytes_per_sec;
 
 #[path = "shared/mod.rs"]
 mod shared;
@@ -257,7 +257,7 @@ async fn transport_error_leaves_status_untouched() {
     // Zero rules: any kube call would 404 and surface as an unexpected
     // request. The reconcile must short-circuit before patching.
     let mut config = op_config(NS);
-    config.controller_error_requeue = crabka_units::millis(1_234);
+    config.controller_error_requeue = krabka_units::millis(1_234);
     let (ctx, state) = build_ctx_with_config(NS, vec![], config);
     let fake = Arc::new(
         FakeRebalancerClient::new().with_create(FakeResp::Transport("connection refused".into())),

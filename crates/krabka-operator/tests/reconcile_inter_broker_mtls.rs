@@ -58,12 +58,12 @@ fn kafka_cr(name: &str, namespace: &str) -> Kafka {
 /// `broker-{id}.toml` key for every replica, and each TOML must contain:
 /// - `controller_listener_protocol = "Ssl"`
 /// - `[tls_config]`
-/// - `cert_path = "/etc/crabka/broker-tls/{id}.crt"`
-/// - `key_path = "/etc/crabka/broker-tls/{id}.key"`
-/// - `client_ca_path = "/etc/crabka/cluster-ca/ca.crt"`
+/// - `cert_path = "/etc/krabka/broker-tls/{id}.crt"`
+/// - `key_path = "/etc/krabka/broker-tls/{id}.key"`
+/// - `client_ca_path = "/etc/krabka/cluster-ca/ca.crt"`
 /// - `client_auth = "Required"`
 ///
-/// A parse with `toml::from_str::<crabka_broker::file_config::FileConfig>`
+/// A parse with `toml::from_str::<krabka_broker::file_config::FileConfig>`
 /// must succeed and return `tls_config.is_some() = true`.
 #[tokio::test]
 async fn rendered_broker_config_carries_controller_listener_protocol_ssl_and_tls_block() {
@@ -108,16 +108,16 @@ async fn rendered_broker_config_carries_controller_listener_protocol_ssl_and_tls
     for needle in [
         "controller_listener_protocol = \"Ssl\"",
         "[tls_config]",
-        "cert_path = \"/etc/crabka/broker-tls/0.crt\"",
-        "key_path = \"/etc/crabka/broker-tls/0.key\"",
-        "client_ca_path = \"/etc/crabka/cluster-ca/ca.crt\"",
+        "cert_path = \"/etc/krabka/broker-tls/0.crt\"",
+        "key_path = \"/etc/krabka/broker-tls/0.key\"",
+        "client_ca_path = \"/etc/krabka/cluster-ca/ca.crt\"",
         "client_auth = \"Required\"",
     ] {
         assert!(toml_str.contains(needle), "{needle} missing;\n{toml_str}");
     }
 
     // Round-trip parse through the broker's own FileConfig.
-    let parsed: crabka_broker::file_config::FileConfig =
+    let parsed: krabka_broker::file_config::FileConfig =
         toml::from_str(toml_str).expect("broker-0.toml must parse as FileConfig");
     assert!(
         parsed.tls_config.is_some(),

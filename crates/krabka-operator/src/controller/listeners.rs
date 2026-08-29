@@ -5,12 +5,12 @@
 
 use std::{collections::BTreeMap, net::IpAddr};
 
-use crabka_security::{ListenerProtocol, SaslMechanism, ca::SubjectAltName};
-use crabka_units::fmt::Human as _;
 use k8s_openapi::api::{
     core::v1::{Node, Service},
     networking::v1::Ingress,
 };
+use krabka_security::{ListenerProtocol, SaslMechanism, ca::SubjectAltName};
+use krabka_units::fmt::Human as _;
 use kube::Resource as _;
 
 use crate::{
@@ -278,7 +278,7 @@ fn validate_gssapi_listener(
         ));
     }
     for specification in &config.principal_to_local_rules {
-        if crabka_security::gssapi::name::Rule::parse(specification).is_err() {
+        if krabka_security::gssapi::name::Rule::parse(specification).is_err() {
             return Err(ValidationError::ListenerGssapiInvalidRule(format!(
                 "listener '{}': invalid principalToLocalRules entry {specification:?}",
                 listener.name
@@ -804,19 +804,19 @@ pub(crate) const INGRESS_PORT: i32 = 443;
 /// `volumeMount` of the broker pod template. Both use the same path, so
 /// the broker's `LocalTieredStorage` writes through one canonical
 /// location.
-pub(crate) const TIER_STORAGE_PATH: &str = "/var/lib/crabka/remote";
+pub(crate) const TIER_STORAGE_PATH: &str = "/var/lib/krabka/remote";
 
 /// Fixed in-pod path where the operator mounts the GSSAPI keytab.
 ///
 /// Both the `[gssapi]` and `[inter_broker_credentials]` TOML blocks refer
 /// to it.
-pub(crate) const GSSAPI_KEYTAB_PATH: &str = "/etc/crabka/gssapi-keytab/keytab";
+pub(crate) const GSSAPI_KEYTAB_PATH: &str = "/etc/krabka/gssapi-keytab/keytab";
 
 /// Directory that the operator mounts the GSSAPI keytab Secret into.
 ///
 /// The projected item path `keytab` below this directory gives
 /// `GSSAPI_KEYTAB_PATH`.
-pub(crate) const GSSAPI_KEYTAB_DIR: &str = "/etc/crabka/gssapi-keytab";
+pub(crate) const GSSAPI_KEYTAB_DIR: &str = "/etc/krabka/gssapi-keytab";
 
 /// KIP-405: fixed in-pod directory for the GCS service-account key.
 ///
@@ -827,7 +827,7 @@ pub(crate) const GSSAPI_KEYTAB_DIR: &str = "/etc/crabka/gssapi-keytab";
 /// at `<GCS_CREDENTIALS_DIR>/key.json`. The operator uses this directory
 /// only when `gcs.credentials` is set. Keyless Workload Identity and ADC
 /// mount nothing.
-pub(crate) const GCS_CREDENTIALS_DIR: &str = "/etc/crabka/gcs-credentials";
+pub(crate) const GCS_CREDENTIALS_DIR: &str = "/etc/krabka/gcs-credentials";
 
 /// Projected filename for the GCS service-account JSON key below
 /// [`GCS_CREDENTIALS_DIR`].
@@ -2177,7 +2177,7 @@ mod tests {
 
     #[test]
     fn listener_protocol_table_all_legal_tuples() {
-        use crabka_security::ListenerProtocol::*;
+        use krabka_security::ListenerProtocol::*;
         let cases = [
             (false, None, Plaintext),
             (true, None, Ssl),
@@ -2964,7 +2964,7 @@ pub struct BrokerTlsRender {
     /// `controller_listener_protocol = "<v>"` line.
     pub controller_listener_protocol: String,
     /// Path to the broker's own cert, for example
-    /// `/etc/crabka/broker-tls/0.crt`.
+    /// `/etc/krabka/broker-tls/0.crt`.
     pub cert_path: String,
     /// Path to the broker's own private key.
     pub key_path: String,
@@ -3259,8 +3259,8 @@ fn render_listener_sections(
         let _ = writeln!(out, "protocol = \"{proto_str}\"");
 
         if l.tls {
-            let cert_path = format!("/etc/crabka/broker-tls/{broker_id}.crt");
-            let key_path = format!("/etc/crabka/broker-tls/{broker_id}.key");
+            let cert_path = format!("/etc/krabka/broker-tls/{broker_id}.crt");
+            let key_path = format!("/etc/krabka/broker-tls/{broker_id}.key");
             let needs_client_ca = matches!(l.authentication, Some(ListenerAuthentication::Tls));
             let client_auth = if needs_client_ca {
                 "Required"
@@ -3268,8 +3268,8 @@ fn render_listener_sections(
                 "Disabled"
             };
             if needs_client_ca {
-                // Mounted at /etc/crabka/clients-ca/ca.crt by the broker pod template.
-                let client_ca = clients_ca_path.unwrap_or("/etc/crabka/clients-ca/ca.crt");
+                // Mounted at /etc/krabka/clients-ca/ca.crt by the broker pod template.
+                let client_ca = clients_ca_path.unwrap_or("/etc/krabka/clients-ca/ca.crt");
                 let _ = writeln!(
                     out,
                     "tls_config = {{ cert_path = \"{cert_path}\", key_path = \"{key_path}\", client_ca_path = \"{client_ca}\", client_auth = \"{client_auth}\" }}"
@@ -3306,7 +3306,7 @@ fn render_broker_header(
     use std::fmt::Write as _;
     let (controller_quorum_voters, controller_server_name) = controller;
     let _ = writeln!(out, "broker_id = {broker_id}");
-    let _ = writeln!(out, "log_dir = \"/var/lib/crabka/data\"");
+    let _ = writeln!(out, "log_dir = \"/var/lib/krabka/data\"");
     let _ = writeln!(out, "heartbeat_interval = \"500ms\"");
     let _ = writeln!(out, "heartbeat_timeout = \"3s\"");
     let _ = writeln!(out, "replica_lag_time_max = \"2s\"");
@@ -3494,7 +3494,7 @@ pub fn render_broker_toml(
             // operator emits it whenever introspection mode is selected.
             let _ = writeln!(
                 out,
-                r#"introspection_client_secret_path = "/etc/crabka/oauth-introspection/client-secret""#
+                r#"introspection_client_secret_path = "/etc/krabka/oauth-introspection/client-secret""#
             );
             if let Some(s) = oauth_cfg.introspection_http_timeout_seconds {
                 let _ = writeln!(
@@ -3520,7 +3520,7 @@ pub fn render_broker_toml(
         if !oauth_cfg.tls_trusted_certificates.is_empty() {
             let _ = writeln!(
                 out,
-                r#"idp_tls_trust = "/etc/crabka/oauth-jwks-trust/ca.crt""#,
+                r#"idp_tls_trust = "/etc/krabka/oauth-jwks-trust/ca.crt""#,
             );
         }
         if let Some(s) = oauth_cfg.max_seconds_without_reauthentication {
@@ -3671,15 +3671,15 @@ mod toml_rendering_tests {
         );
 
         // Sanity: parses cleanly with the broker's FileConfig.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&toml_str).expect("rendered TOML must parse with broker FileConfig");
         check!(parsed.broker_id == Some(0));
         check!(parsed.inter_broker_listener_name.as_deref() == Some("PLAIN"));
-        check!(parsed.heartbeat_interval == Some(crabka_units::millis(500)));
-        check!(parsed.heartbeat_timeout == Some(crabka_units::secs(3)));
-        check!(parsed.replica_lag_time_max == Some(crabka_units::secs(2)));
-        check!(parsed.controller_election_timeout == Some(crabka_units::millis(500)));
-        check!(parsed.controller_heartbeat_interval == Some(crabka_units::millis(100)));
+        check!(parsed.heartbeat_interval == Some(krabka_units::millis(500)));
+        check!(parsed.heartbeat_timeout == Some(krabka_units::secs(3)));
+        check!(parsed.replica_lag_time_max == Some(krabka_units::secs(2)));
+        check!(parsed.controller_election_timeout == Some(krabka_units::millis(500)));
+        check!(parsed.controller_heartbeat_interval == Some(krabka_units::millis(100)));
         check!(parsed.listeners.len() == 1);
         check!(parsed.listeners[0].advertised == "demo-0.svc.local:9092");
     }
@@ -3724,7 +3724,7 @@ mod toml_rendering_tests {
         );
 
         // Round-trips through the broker's FileConfig with the exact set.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&toml_str).expect("rendered TOML must parse with broker FileConfig");
         assert!(parsed.controller_quorum_voters == voters);
     }
@@ -3750,7 +3750,7 @@ mod toml_rendering_tests {
             !toml_str.contains("controller_quorum_voters"),
             "empty voter slice must emit no key, got:\n{toml_str}"
         );
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&toml_str).expect("rendered TOML must parse with broker FileConfig");
         assert!(parsed.controller_quorum_voters.is_empty());
     }
@@ -3791,7 +3791,7 @@ mod toml_rendering_tests {
         );
 
         // Round-trips through the broker's FileConfig with the exact value.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&toml_str).expect("rendered TOML must parse with broker FileConfig");
         assert!(parsed.controller_server_name.as_deref() == Some(server_name));
     }
@@ -3817,7 +3817,7 @@ mod toml_rendering_tests {
             !toml_str.contains("controller_server_name"),
             "empty server name must emit no key, got:\n{toml_str}"
         );
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&toml_str).expect("rendered TOML must parse with broker FileConfig");
         assert!(parsed.controller_server_name.is_none());
     }
@@ -3914,7 +3914,7 @@ mod toml_rendering_tests {
         // Round-trip: the broker's FileConfig must accept the rendered
         // block and the `[authorization].super_users` field must carry
         // ANONYMOUS.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("rendered TOML must parse with broker FileConfig");
         let authz = parsed
             .authorization
@@ -3989,7 +3989,7 @@ mod toml_rendering_tests {
             );
         }
         // Round-trip through the broker's FileConfig.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("rendered TOML must parse with broker FileConfig");
         let a = parsed.authorization.expect("[authorization] present");
         assert!(a.super_users == vec!["admin".to_string()]);
@@ -4143,15 +4143,15 @@ mod toml_rendering_tests {
             "expected [remote_storage] block, got:\n{t}"
         );
         assert!(
-            t.contains("storage_dir = \"/var/lib/crabka/remote\""),
+            t.contains("storage_dir = \"/var/lib/krabka/remote\""),
             "expected canonical storage_dir line, got:\n{t}"
         );
         // Round-trip: the broker's FileConfig must accept the rendered
         // block and surface the path as the broker's tier storage dir.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("rendered TOML must parse with broker FileConfig");
         let rs = parsed.remote_storage.expect("[remote_storage] round-trips");
-        assert!(rs.storage_dir.as_deref() == Some("/var/lib/crabka/remote"));
+        assert!(rs.storage_dir.as_deref() == Some("/var/lib/krabka/remote"));
     }
 
     #[test]
@@ -4203,12 +4203,12 @@ mod toml_rendering_tests {
                     bootstrap: "127.0.0.1:9094".into(),
                     num_partitions: Some(8),
                     replication: Some(1),
-                    topic_create_timeout: Some(crabka_units::secs(45)),
-                    fetch_max_wait: Some(crabka_units::millis(750)),
-                    fetch_max_bytes: Some(crabka_units::mebibytes(2)),
-                    fetch_retry_backoff: Some(crabka_units::millis(300)),
+                    topic_create_timeout: Some(krabka_units::secs(45)),
+                    fetch_max_wait: Some(krabka_units::millis(750)),
+                    fetch_max_bytes: Some(krabka_units::mebibytes(2)),
+                    fetch_retry_backoff: Some(krabka_units::millis(300)),
                     event_queue_capacity: Some(2048),
-                    snapshot_interval: Some(crabka_units::secs(90)),
+                    snapshot_interval: Some(krabka_units::secs(90)),
                 }),
             }),
             persistence: None,
@@ -4235,7 +4235,7 @@ mod toml_rendering_tests {
             assert!(t.contains(needle), "needle {needle:?} missing, got:\n{t}");
         }
         // Round-trip through the broker's FileConfig.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("rendered TOML must parse with broker FileConfig");
         let km = parsed
             .remote_storage
@@ -4247,24 +4247,24 @@ mod toml_rendering_tests {
         check!(km.bootstrap == "127.0.0.1:9094");
         check!(km.num_partitions == Some(8));
         check!(km.replication == Some(1));
-        check!(km.topic_create_timeout == Some(crabka_units::secs(45)));
-        check!(km.fetch_max_wait == Some(crabka_units::millis(750)));
-        check!(km.fetch_max_bytes == Some(crabka_units::mebibytes(2)));
-        check!(km.fetch_retry_backoff == Some(crabka_units::millis(300)));
+        check!(km.topic_create_timeout == Some(krabka_units::secs(45)));
+        check!(km.fetch_max_wait == Some(krabka_units::millis(750)));
+        check!(km.fetch_max_bytes == Some(krabka_units::mebibytes(2)));
+        check!(km.fetch_retry_backoff == Some(krabka_units::millis(300)));
         check!(km.event_queue_capacity == Some(2048));
-        check!(km.snapshot_interval == Some(crabka_units::secs(90)));
+        check!(km.snapshot_interval == Some(krabka_units::secs(90)));
 
-        let mut broker = crabka_broker::BrokerConfig::default();
+        let mut broker = krabka_broker::BrokerConfig::default();
         parsed.apply_to(&mut broker).expect("apply rendered TOML");
-        let crabka_broker::RlmmKind::TopicBacked(policy) = broker.remote_log_metadata else {
+        let krabka_broker::RlmmKind::TopicBacked(policy) = broker.remote_log_metadata else {
             panic!("rendered policy must select topic-backed RLMM");
         };
-        check!(policy.topic_create_timeout == crabka_units::secs(45));
-        check!(policy.fetch_max_wait == crabka_units::millis(750));
-        check!(policy.fetch_max_bytes == crabka_units::mebibytes(2));
-        check!(policy.fetch_retry_backoff == crabka_units::millis(300));
+        check!(policy.topic_create_timeout == krabka_units::secs(45));
+        check!(policy.fetch_max_wait == krabka_units::millis(750));
+        check!(policy.fetch_max_bytes == krabka_units::mebibytes(2));
+        check!(policy.fetch_retry_backoff == krabka_units::millis(300));
         check!(policy.event_queue_capacity.capacity() == 2048);
-        check!(policy.snapshot_interval == crabka_units::secs(90));
+        check!(policy.snapshot_interval == krabka_units::secs(90));
     }
 
     #[test]
@@ -4391,7 +4391,7 @@ mod toml_rendering_tests {
         let ts = crate::crd::kafka::TieredStorage {
             kind: crate::crd::kafka::TieredStorageType::S3,
             s3: Some(crate::crd::kafka::S3StorageSpec {
-                bucket: "crabka-tier".into(),
+                bucket: "krabka-tier".into(),
                 region: "us-east-1".into(),
                 prefix: Some("cluster-a".into()),
                 endpoint: Some("http://minio.svc:9000".into()),
@@ -4416,7 +4416,7 @@ mod toml_rendering_tests {
         for (needle, want) in [
             ("[remote_storage]", true),
             ("[remote_storage.s3]", true),
-            ("bucket = \"crabka-tier\"", true),
+            ("bucket = \"krabka-tier\"", true),
             ("region = \"us-east-1\"", true),
             ("prefix = \"cluster-a\"", true),
             ("endpoint = \"http://minio.svc:9000\"", true),
@@ -4432,11 +4432,11 @@ mod toml_rendering_tests {
             );
         }
         // Broker round-trip.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("rendered TOML must parse with broker FileConfig");
         let rs = parsed.remote_storage.expect("[remote_storage] round-trips");
         let s3 = rs.s3.expect("[remote_storage.s3] round-trips");
-        check!(s3.bucket == "crabka-tier");
+        check!(s3.bucket == "krabka-tier");
         check!(s3.region == "us-east-1");
         check!(s3.prefix.as_deref() == Some("cluster-a"));
         check!(s3.endpoint.as_deref() == Some("http://minio.svc:9000"));
@@ -4498,7 +4498,7 @@ mod toml_rendering_tests {
             );
         }
         // Broker round-trip.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("rendered TOML must parse with broker FileConfig");
         let s3 = parsed
             .remote_storage
@@ -4544,7 +4544,7 @@ mod toml_rendering_tests {
         );
         // The rendered TOML must parse; if escaping is broken the
         // broker's FileConfig would error out before the assertion below.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("escaped TOML must parse");
         let s3 = parsed
             .remote_storage
@@ -4572,12 +4572,12 @@ mod toml_rendering_tests {
             kind: crate::crd::kafka::TieredStorageType::Gcs,
             s3: None,
             gcs: Some(crate::crd::kafka::GcsStorageSpec {
-                bucket: "crabka-tier".into(),
+                bucket: "krabka-tier".into(),
                 prefix: Some("cluster-a".into()),
                 endpoint: Some("http://fake-gcs.svc:4443".into()),
                 credentials: Some(crate::crd::kafka::GcsCredentials {
                     service_account_key: crate::crd::kafka::SecretKeyRef {
-                        name: "crabka-gcs-creds".into(),
+                        name: "krabka-gcs-creds".into(),
                         key: Some("key.json".into()),
                     },
                 }),
@@ -4599,12 +4599,12 @@ mod toml_rendering_tests {
         for (needle, want) in [
             ("[remote_storage]", true),
             ("[remote_storage.gcs]", true),
-            ("bucket = \"crabka-tier\"", true),
+            ("bucket = \"krabka-tier\"", true),
             ("prefix = \"cluster-a\"", true),
             ("endpoint = \"http://fake-gcs.svc:4443\"", true),
             ("allow_http = true", true),
             (
-                "service_account_path = \"/etc/crabka/gcs-credentials/key.json\"",
+                "service_account_path = \"/etc/krabka/gcs-credentials/key.json\"",
                 true,
             ),
             ("multipart_threshold = 4096", true),
@@ -4617,18 +4617,18 @@ mod toml_rendering_tests {
             );
         }
         // Broker round-trip: the rendered TOML must parse into FileConfig.
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("rendered TOML must parse with broker FileConfig");
         let gcs = parsed
             .remote_storage
             .expect("[remote_storage] round-trips")
             .gcs
             .expect("[remote_storage.gcs] round-trips");
-        check!(gcs.bucket == "crabka-tier");
+        check!(gcs.bucket == "krabka-tier");
         check!(gcs.prefix.as_deref() == Some("cluster-a"));
         check!(gcs.endpoint.as_deref() == Some("http://fake-gcs.svc:4443"));
         check!(gcs.allow_http);
-        check!(gcs.service_account_path.as_deref() == Some("/etc/crabka/gcs-credentials/key.json"));
+        check!(gcs.service_account_path.as_deref() == Some("/etc/krabka/gcs-credentials/key.json"));
         check!(gcs.multipart_threshold == Some(4096));
         check!(gcs.multipart_chunk_size == Some(1024));
     }
@@ -4679,7 +4679,7 @@ mod toml_rendering_tests {
                 "needle {needle:?}: expected contains == {want}, got:\n{t}"
             );
         }
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("rendered TOML must parse with broker FileConfig");
         let gcs = parsed
             .remote_storage
@@ -4704,11 +4704,11 @@ mod toml_rendering_tests {
         let props = std::collections::BTreeMap::new();
         let tls = BrokerTlsRender {
             controller_listener_protocol: "Ssl".into(),
-            cert_path: "/etc/crabka/broker-tls/0.crt".into(),
-            key_path: "/etc/crabka/broker-tls/0.key".into(),
-            client_ca_path: "/etc/crabka/cluster-ca/ca.crt".into(),
+            cert_path: "/etc/krabka/broker-tls/0.crt".into(),
+            key_path: "/etc/krabka/broker-tls/0.key".into(),
+            client_ca_path: "/etc/krabka/cluster-ca/ca.crt".into(),
             client_auth: "Required".into(),
-            trust_roots_path: "/etc/crabka/cluster-ca/ca.crt".into(),
+            trust_roots_path: "/etc/krabka/cluster-ca/ca.crt".into(),
         };
         let toml_str = render_broker_toml(
             (0, &listeners, &addrs, "PLAIN"),
@@ -4718,19 +4718,19 @@ mod toml_rendering_tests {
             (&[], ""),
         );
 
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&toml_str).expect("rendered TOML must parse with broker FileConfig");
         assert!(
-            parsed.controller_listener_protocol == Some(crabka_security::ListenerProtocol::Ssl)
+            parsed.controller_listener_protocol == Some(krabka_security::ListenerProtocol::Ssl)
         );
         let parsed_tls = parsed.tls_config.expect("tls_config emitted");
-        assert!(parsed_tls.cert_path == std::path::PathBuf::from("/etc/crabka/broker-tls/0.crt"));
+        assert!(parsed_tls.cert_path == std::path::PathBuf::from("/etc/krabka/broker-tls/0.crt"));
         // The cluster CA must be wired as the controller-quorum TLS trust
         // roots inside [tls_config] so the outbound raft dialer trusts peer
         // serving certs (KIP-595 controller mTLS).
         assert!(
             parsed_tls.trust_roots_path
-                == Some(std::path::PathBuf::from("/etc/crabka/cluster-ca/ca.crt"))
+                == Some(std::path::PathBuf::from("/etc/krabka/cluster-ca/ca.crt"))
         );
     }
 
@@ -4783,11 +4783,11 @@ mod toml_rendering_tests {
                 &BTreeMap::new(),
                 Some(&BrokerTlsRender {
                     controller_listener_protocol: "Ssl".into(),
-                    cert_path: "/etc/crabka/broker-tls/0.crt".into(),
-                    key_path: "/etc/crabka/broker-tls/0.key".into(),
-                    client_ca_path: "/etc/crabka/cluster-ca/ca.crt".into(),
+                    cert_path: "/etc/krabka/broker-tls/0.crt".into(),
+                    key_path: "/etc/krabka/broker-tls/0.key".into(),
+                    client_ca_path: "/etc/krabka/cluster-ca/ca.crt".into(),
                     client_auth: "Required".into(),
-                    trust_roots_path: "/etc/crabka/cluster-ca/ca.crt".into(),
+                    trust_roots_path: "/etc/krabka/cluster-ca/ca.crt".into(),
                 }),
                 None,
             ),
@@ -4797,7 +4797,7 @@ mod toml_rendering_tests {
         );
         for needle in [
             "protocol = \"SaslSsl\"",
-            "tls_config = { cert_path = \"/etc/crabka/broker-tls/0.crt\"",
+            "tls_config = { cert_path = \"/etc/krabka/broker-tls/0.crt\"",
             "sasl_config = { enabled_mechanisms = [\"SCRAM-SHA-512\"] }",
             "[tls_config]",
         ] {
@@ -4868,11 +4868,11 @@ mod toml_rendering_tests {
     fn render_tls() -> BrokerTlsRender {
         BrokerTlsRender {
             controller_listener_protocol: "Ssl".into(),
-            cert_path: "/etc/crabka/broker-tls/0.crt".into(),
-            key_path: "/etc/crabka/broker-tls/0.key".into(),
-            client_ca_path: "/etc/crabka/cluster-ca/ca.crt".into(),
+            cert_path: "/etc/krabka/broker-tls/0.crt".into(),
+            key_path: "/etc/krabka/broker-tls/0.key".into(),
+            client_ca_path: "/etc/krabka/cluster-ca/ca.crt".into(),
             client_auth: "Required".into(),
-            trust_roots_path: "/etc/crabka/cluster-ca/ca.crt".into(),
+            trust_roots_path: "/etc/krabka/cluster-ca/ca.crt".into(),
         }
     }
 
@@ -4910,7 +4910,7 @@ mod toml_rendering_tests {
     #[test]
     fn render_emits_gssapi_block_and_mechanism() {
         let mut config = gssapi_cfg_with_service("kafka");
-        config.max_time_skew = Some(crabka_units::secs(17));
+        config.max_time_skew = Some(krabka_units::secs(17));
         let l = gssapi_listener("gss", 9092, false, config);
         let addrs = addrs_for("gss", 9092);
         let toml = render_broker_toml(
@@ -4922,7 +4922,7 @@ mod toml_rendering_tests {
         );
         for (needle, want) in [
             ("[gssapi]", true),
-            (r#"keytab_path = "/etc/crabka/gssapi-keytab/keytab""#, true),
+            (r#"keytab_path = "/etc/krabka/gssapi-keytab/keytab""#, true),
             (r#"service_name = "kafka""#, true),
             (r#"principal_to_local_rules = ["DEFAULT"]"#, true),
             (r#"max_time_skew = "17s""#, true),
@@ -4955,7 +4955,7 @@ mod toml_rendering_tests {
         for needle in [
             "[inter_broker_credentials]",
             r#"type = "gssapi""#,
-            r#"keytab_path = "/etc/crabka/gssapi-keytab/keytab""#,
+            r#"keytab_path = "/etc/krabka/gssapi-keytab/keytab""#,
             r#"client_principal = "kafka@EXAMPLE.COM""#,
             r#"kdc_url = "tcp://kdc:88""#,
         ] {
@@ -5068,7 +5068,7 @@ mod toml_rendering_tests {
             (&[], ""),
         );
         assert!(
-            toml.contains("idp_tls_trust = \"/etc/crabka/oauth-jwks-trust/ca.crt\""),
+            toml.contains("idp_tls_trust = \"/etc/krabka/oauth-jwks-trust/ca.crt\""),
             "TOML: {toml}"
         );
     }
@@ -5236,7 +5236,7 @@ mod toml_rendering_tests {
             None,
             (&[], ""),
         );
-        let parsed: crabka_broker::file_config::FileConfig =
+        let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&toml).expect("rendered TOML must parse with broker FileConfig");
         let ob = parsed.oauthbearer.expect("oauthbearer block emitted");
         check!(
@@ -5390,7 +5390,7 @@ mod toml_rendering_tests {
             "[oauthbearer]",
             "introspection_endpoint_uri = \"https://idp.example/introspect\"",
             "introspection_client_id = \"kafka-broker\"",
-            "introspection_client_secret_path = \"/etc/crabka/oauth-introspection/client-secret\"",
+            "introspection_client_secret_path = \"/etc/krabka/oauth-introspection/client-secret\"",
         ] {
             assert!(toml.contains(needle), "missing {needle:?} in TOML: {toml}");
         }
@@ -5471,7 +5471,7 @@ mod toml_rendering_tests {
         let expected = "introspection_endpoint_uri = \"https://idp.example/introspect\"\n\
             userinfo_endpoint_uri = \"https://idp.example/userinfo\"\n\
             introspection_client_id = \"kafka-broker\"\n\
-            introspection_client_secret_path = \"/etc/crabka/oauth-introspection/client-secret\"\n\
+            introspection_client_secret_path = \"/etc/krabka/oauth-introspection/client-secret\"\n\
             introspection_http_timeout_ms = 15000\n";
         assert!(
             toml.contains(expected),
@@ -5504,7 +5504,7 @@ mod toml_rendering_tests {
             (
                 &BTreeMap::new(),
                 None,
-                Some("/etc/crabka/clients-ca/ca.crt"),
+                Some("/etc/krabka/clients-ca/ca.crt"),
             ),
             (false, None, None),
             None,
@@ -5512,7 +5512,7 @@ mod toml_rendering_tests {
         );
         for needle in [
             "protocol = \"Ssl\"",
-            "client_ca_path = \"/etc/crabka/clients-ca/ca.crt\"",
+            "client_ca_path = \"/etc/krabka/clients-ca/ca.crt\"",
             "client_auth = \"Required\"",
         ] {
             assert!(toml.contains(needle), "missing {needle:?} in TOML: {toml}");
