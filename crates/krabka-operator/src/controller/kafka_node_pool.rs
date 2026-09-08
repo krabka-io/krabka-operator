@@ -1522,6 +1522,7 @@ pub(crate) fn render_statefulset(
             "maxSkew": 1,
             "topologyKey": "kubernetes.io/hostname",
             "whenUnsatisfiable": "DoNotSchedule",
+            "nodeTaintsPolicy": "Honor",
             "labelSelector": { "matchLabels": {
                 "app.kubernetes.io/instance": parent_name,
                 "krabka.io/controller-role": "true"
@@ -2858,6 +2859,7 @@ mod tests {
         let spread = &pod.topology_spread_constraints.as_ref().unwrap()[0];
         assert!(spread.topology_key == "kubernetes.io/hostname");
         assert!(spread.when_unsatisfiable == "DoNotSchedule");
+        assert!(spread.node_taints_policy.as_deref() == Some("Honor"));
 
         let resources = pod.init_containers.as_ref().unwrap()[0]
             .resources
