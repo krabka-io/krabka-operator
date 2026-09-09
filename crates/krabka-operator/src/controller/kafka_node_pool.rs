@@ -660,6 +660,10 @@ fn render_init_container(
             "allowPrivilegeEscalation": false,
             "readOnlyRootFilesystem": true,
             "capabilities": { "drop": ["ALL"] }
+        },
+        "resources": {
+            "requests": { "cpu": "10m", "memory": "32Mi" },
+            "limits": { "cpu": "100m", "memory": "128Mi" }
         }
     })
 }
@@ -1513,6 +1517,18 @@ pub(crate) fn render_statefulset(
         "containers": [main],
         "volumes": [{ "name": "data", "emptyDir": {} }],
     });
+    if pool.spec.roles.contains(&NodeRole::Controller) {
+        pod_spec["topologySpreadConstraints"] = json!([{
+            "maxSkew": 1,
+            "topologyKey": "kubernetes.io/hostname",
+            "whenUnsatisfiable": "DoNotSchedule",
+            "nodeTaintsPolicy": "Honor",
+            "labelSelector": { "matchLabels": {
+                "app.kubernetes.io/instance": parent_name,
+                "krabka.io/controller-role": "true"
+            }}
+        }]);
+    }
     if let Some(tpl) = pool.spec.template.as_ref() {
         if let Some(affinity) = tpl.affinity.as_ref() {
             pod_spec["affinity"] = serde_json::to_value(affinity)?;
@@ -2829,6 +2845,28 @@ mod tests {
                 == Some("demo")
         );
         assert!(pod_labels.get("krabka.io/pool").map(String::as_str) == Some("brokers"));
+    }
+
+    #[test]
+    fn controller_pods_spread_by_node_and_format_has_resource_bounds() {
+        let sts = render_statefulset(
+            &parent_fixture("demo"),
+            &pool_fixture("brokers", "demo", 3),
+            DEFAULT_BROKER_IMAGE,
+        )
+        .unwrap();
+        let pod = sts.spec.unwrap().template.spec.unwrap();
+        let spread = &pod.topology_spread_constraints.as_ref().unwrap()[0];
+        assert!(spread.topology_key == "kubernetes.io/hostname");
+        assert!(spread.when_unsatisfiable == "DoNotSchedule");
+        assert!(spread.node_taints_policy.as_deref() == Some("Honor"));
+
+        let resources = pod.init_containers.as_ref().unwrap()[0]
+            .resources
+            .as_ref()
+            .unwrap();
+        assert!(resources.requests.as_ref().unwrap().contains_key("memory"));
+        assert!(resources.limits.as_ref().unwrap().contains_key("memory"));
     }
 
     #[test]
