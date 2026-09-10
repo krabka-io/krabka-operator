@@ -16,9 +16,10 @@ use krabka_operator::{
         KafkaCondition, KafkaRebalance, KafkaRebalanceMode, KafkaRebalanceSpec,
         KafkaRebalanceStatus, RebalancerAuthorizationSecretRef,
     },
-    rebalancer_client::ProposalStatus,
+    rebalancer_client::{ConnectRebalancerClient, ProposalStatus},
 };
-use krabka_units::mebibytes_per_sec;
+use krabka_units::{mebibytes_per_sec, secs};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 #[path = "shared/mod.rs"]
 mod shared;
@@ -162,6 +163,67 @@ async fn new_rebalance_creates_proposal() {
     check!(body["status"]["sessionId"] == "p-new");
     check!(body["status"]["optimizationResult"]["replicaMovements"] == 2);
     check!(body["status"]["observedGeneration"] == 1);
+}
+
+#[tokio::test]
+async fn remove_brokers_secret_reaches_real_client_as_bearer_header() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server_endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let resource_endpoint = "http://test-rebalancer.kafka.svc:9300";
+    let server = tokio::spawn(async move {
+        let (mut connection, _) = listener.accept().await.unwrap();
+        let mut request = vec![0; 8_192];
+        let read = connection.read(&mut request).await.unwrap();
+        request.truncate(read);
+        let body = r#"{"id":"p-auth","status":"PROPOSAL_STATUS_COMPUTED"}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        connection.write_all(response.as_bytes()).await.unwrap();
+        String::from_utf8(request).unwrap()
+    });
+    let (ctx, state) = build_ctx(
+        NS,
+        vec![
+            auth_secret_rule("demo-rebalancer-auth"),
+            status_rule("authenticated"),
+        ],
+    );
+    ctx.insert_rebalancer_client_for_test(
+        resource_endpoint,
+        Arc::new(ConnectRebalancerClient::new(&server_endpoint, secs(5))),
+    )
+    .await;
+    let mut kr = rebalance("authenticated");
+    kr.spec.endpoint = Some(resource_endpoint.into());
+    use_remove_brokers_auth(&mut kr);
+    kr.spec.brokers = vec![3];
+
+    tokio::time::timeout(
+        core::time::Duration::from_secs(5),
+        reconcile(Arc::new(kr), ctx),
+    )
+    .await
+    .expect("authenticated reconcile completes")
+    .unwrap();
+    let observed = state.take_observed();
+    let body = status_patch_body(&observed, "authenticated");
+    assert!(
+        body["status"]["conditions"][0]["type"] == "ProposalReady",
+        "status = {body}"
+    );
+
+    let request = tokio::time::timeout(core::time::Duration::from_secs(5), server)
+        .await
+        .expect("rebalancer receives request")
+        .unwrap();
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("\r\nauthorization: bearer test-token\r\n")
+    );
+    assert!(request.contains(r#""mode":"PROPOSAL_MODE_REMOVE_BROKERS""#));
 }
 
 /// `approve` on a `ProposalReady` proposal leads to `ExecuteProposal`,

@@ -18,9 +18,10 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use assert2::assert;
 use http::{Method, Response};
+use krabka_client_admin::PartitionAssignment;
 use krabka_operator::{
     controller::kafka_node_pool::reconcile,
-    crd::{KafkaNodePool, KafkaNodePoolSpec, NodeRole},
+    crd::{KafkaNodePool, KafkaNodePoolSpec, NodeRole, PersistentClaimSpec, Storage},
 };
 
 #[path = "shared/mod.rs"]
@@ -297,6 +298,101 @@ fn build_ctx(
     let state = MockState::new(rules);
     let client = mock_client(&state, namespace);
     (Arc::new(fixture_ctx(client, namespace)), state)
+}
+
+fn ready_broker_drain(desired_replicas: i32, brokers: &[i32]) -> serde_json::Value {
+    serde_json::json!({
+        "apiVersion": "krabka.io/v1alpha1",
+        "kind": "KafkaRebalance",
+        "metadata": {
+            "name": format!("demo-brokers-drain-to-{desired_replicas}"),
+            "namespace": "y",
+            "generation": 11
+        },
+        "spec": {
+            "mode": "removeBrokers",
+            "brokers": brokers,
+            "authorizationSecretRef": { "name": "demo-rebalancer-auth", "key": "token" }
+        },
+        "status": {
+            "observedGeneration": 11,
+            "conditions": [{
+                "type": "Ready", "status": "True", "reason": "Completed",
+                "message": "evacuation complete", "lastTransitionTime": "2026-09-10T00:00:00Z"
+            }]
+        }
+    })
+}
+
+fn broker_downscale_rules(desired_replicas: i32, brokers: &[i32]) -> Vec<MockRule> {
+    let parent = "demo";
+    let pool = "brokers";
+    let namespace = "y";
+    let secret = dynamic_secret_body_for_ids(
+        parent,
+        pool,
+        namespace,
+        &[
+            (0, DIRECTORY_ID),
+            (1, uuid::Uuid::from_u128(2)),
+            (2, uuid::Uuid::from_u128(3)),
+            (3, uuid::Uuid::from_u128(4)),
+            (100, uuid::Uuid::from_u128(101)),
+        ],
+    );
+    let mut brokers_pool = fake_pool_body(pool, namespace, parent);
+    brokers_pool["spec"]["roles"] = serde_json::json!(["Broker"]);
+    brokers_pool["spec"]["replicas"] = serde_json::json!(desired_replicas);
+    let mut controllers = fake_pool_body("controllers", namespace, parent);
+    controllers["spec"]["roles"] = serde_json::json!(["Controller"]);
+    controllers["spec"]["nodeIdStart"] = serde_json::json!(100);
+    controllers["status"] = serde_json::json!({
+        "replicas": 1,
+        "readyReplicas": 1,
+        "conditions": [{
+            "type": "Ready", "status": "True", "reason": "Ready", "message": "ready",
+            "lastTransitionTime": "2026-09-10T00:00:00Z"
+        }]
+    });
+    let mut statefulset = fake_sts_body("demo-brokers", namespace, 4, Some(4));
+    statefulset["metadata"]["annotations"] = serde_json::json!({
+        "krabka.io/node-id-start": "0",
+        "krabka.io/process-roles": "broker",
+    });
+    let mut rules = vec![
+        MockRule {
+            method: Method::GET,
+            path_substr: "/kafkas/demo".into(),
+            response: json_response(200, &fake_parent_kafka_body(parent, namespace)),
+        },
+        MockRule {
+            method: Method::GET,
+            path_substr: "/kafkanodepools?".into(),
+            response: json_response(200, &fake_pool_list_body(&[brokers_pool, controllers])),
+        },
+        empty_statefulset_list_rule(),
+        pod_list_rule(namespace, &[]),
+    ];
+    for _ in 0..3 {
+        rules.push(MockRule {
+            method: Method::GET,
+            path_substr: "/secrets/demo-cluster-id".into(),
+            response: json_response(200, &secret),
+        });
+    }
+    rules.extend([
+        MockRule {
+            method: Method::GET,
+            path_substr: "/statefulsets/demo-brokers".into(),
+            response: json_response(200, &statefulset),
+        },
+        MockRule {
+            method: Method::GET,
+            path_substr: format!("/kafkarebalances/demo-brokers-drain-to-{desired_replicas}"),
+            response: json_response(200, &ready_broker_drain(desired_replicas, brokers)),
+        },
+    ]);
+    rules
 }
 
 #[tokio::test]
@@ -815,6 +911,169 @@ async fn broker_scale_down_unregisters_only_after_current_drain_is_clear() {
 }
 
 #[tokio::test]
+async fn broker_scale_down_blocks_when_a_removed_broker_still_has_data() {
+    let mut rules = broker_downscale_rules(2, &[2, 3]);
+    rules.push(MockRule {
+        method: Method::PATCH,
+        path_substr: "/kafkanodepools/brokers/status".into(),
+        response: json_response(200, &fake_pool_body("brokers", "y", "demo")),
+    });
+    let (ctx, state) = build_ctx("y", rules);
+    let admin = Arc::new(tokio::sync::Mutex::new(
+        shared::fake_admin::FakeAdminClient::new(),
+    ));
+    admin
+        .lock()
+        .await
+        .set_partition_assignments(vec![PartitionAssignment {
+            topic: "orders".into(),
+            partition: 0,
+            replicas: vec![0, 1, 2],
+            adding_replicas: Vec::new(),
+            removing_replicas: Vec::new(),
+        }]);
+    ctx.insert_admin_client_for_test("demo", admin.clone())
+        .await;
+    let mut pool = pool_cr("brokers", "y", Some("demo"), 2);
+    pool.spec.roles = vec![NodeRole::Broker];
+
+    reconcile(Arc::new(pool), ctx).await.unwrap();
+
+    assert!(matches!(
+        admin.lock().await.calls().as_slice(),
+        [shared::fake_admin::RecordedCall::DescribePartitionAssignments(topics)] if topics.is_empty()
+    ));
+    let observed = state.take_observed();
+    assert!(observed.iter().all(|request| {
+        !(request.method() == Method::PATCH && request.uri().to_string().contains("/statefulsets/"))
+    }));
+    let status = observed
+        .iter()
+        .find(|request| request.uri().to_string().contains("/status"))
+        .expect("blocked status");
+    let body: serde_json::Value = serde_json::from_slice(status.body()).unwrap();
+    assert!(body["status"]["conditions"][0]["reason"] == "BrokerDrainBlocked");
+    assert!(
+        body["status"]["conditions"][0]["message"]
+            == "orders-0 still has a replica on removed brokers"
+    );
+    assert!(state.remaining_rules() == 0);
+}
+
+#[tokio::test]
+async fn broker_scale_down_unregisters_each_broker_before_shrinking() {
+    let mut rules = broker_downscale_rules(2, &[2, 3]);
+    rules.extend([
+        MockRule {
+            method: Method::PATCH,
+            path_substr: "/kafkanodepools/brokers".into(),
+            response: json_response(200, &fake_pool_body("brokers", "y", "demo")),
+        },
+        MockRule {
+            method: Method::PATCH,
+            path_substr: "/kafkanodepools/brokers/status".into(),
+            response: json_response(200, &fake_pool_body("brokers", "y", "demo")),
+        },
+    ]);
+    let (ctx, state) = build_ctx("y", rules);
+    let admin = Arc::new(tokio::sync::Mutex::new(
+        shared::fake_admin::FakeAdminClient::new(),
+    ));
+    ctx.insert_admin_client_for_test("demo", admin.clone())
+        .await;
+    let mut pool = pool_cr("brokers", "y", Some("demo"), 2);
+    pool.spec.roles = vec![NodeRole::Broker];
+    pool.metadata.annotations = Some(BTreeMap::from([(
+        "krabka.io/unregistered-brokers".into(),
+        "2".into(),
+    )]));
+
+    reconcile(Arc::new(pool), ctx).await.unwrap();
+
+    assert!(matches!(
+        admin.lock().await.calls().as_slice(),
+        [
+            shared::fake_admin::RecordedCall::DescribePartitionAssignments(_),
+            shared::fake_admin::RecordedCall::ListPartitionReassignments(_),
+            shared::fake_admin::RecordedCall::UnregisterBroker(3),
+        ]
+    ));
+    let observed = state.take_observed();
+    assert!(observed.iter().all(|request| {
+        !(request.method() == Method::PATCH && request.uri().to_string().contains("/statefulsets/"))
+    }));
+    let annotation_patch = observed
+        .iter()
+        .find(|request| {
+            request.method() == Method::PATCH
+                && request.uri().path().ends_with("/kafkanodepools/brokers")
+        })
+        .expect("second unregistration annotation patch");
+    let body: serde_json::Value = serde_json::from_slice(annotation_patch.body()).unwrap();
+    assert!(body["metadata"]["annotations"]["krabka.io/unregistered-brokers"] == "2,3");
+    assert!(state.remaining_rules() == 0);
+}
+
+#[tokio::test]
+async fn broker_scale_down_shrinks_only_after_all_brokers_are_unregistered() {
+    let mut rules = broker_downscale_rules(2, &[2, 3]);
+    rules.extend([
+        MockRule {
+            method: Method::PATCH,
+            path_substr: "/statefulsets/demo-brokers".into(),
+            response: json_response(200, &fake_sts_body("demo-brokers", "y", 2, Some(2))),
+        },
+        pdb_apply_rule("demo-brokers", "y"),
+        MockRule {
+            method: Method::GET,
+            path_substr: "/statefulsets/demo-brokers".into(),
+            response: json_response(200, &fake_sts_body("demo-brokers", "y", 2, Some(2))),
+        },
+        MockRule {
+            method: Method::PATCH,
+            path_substr: "/kafkanodepools/brokers/status".into(),
+            response: json_response(200, &fake_pool_body("brokers", "y", "demo")),
+        },
+    ]);
+    let (ctx, state) = build_ctx("y", rules);
+    let admin = Arc::new(tokio::sync::Mutex::new(
+        shared::fake_admin::FakeAdminClient::new(),
+    ));
+    ctx.insert_admin_client_for_test("demo", admin.clone())
+        .await;
+    let mut pool = pool_cr("brokers", "y", Some("demo"), 2);
+    pool.spec.roles = vec![NodeRole::Broker];
+    pool.metadata.annotations = Some(BTreeMap::from([(
+        "krabka.io/unregistered-brokers".into(),
+        "2,3".into(),
+    )]));
+
+    reconcile(Arc::new(pool), ctx).await.unwrap();
+
+    assert!(matches!(
+        admin.lock().await.calls().as_slice(),
+        [
+            shared::fake_admin::RecordedCall::DescribePartitionAssignments(_),
+            shared::fake_admin::RecordedCall::ListPartitionReassignments(_),
+        ]
+    ));
+    let observed = state.take_observed();
+    let statefulset_patch = observed
+        .iter()
+        .find(|request| {
+            request.method() == Method::PATCH
+                && request
+                    .uri()
+                    .to_string()
+                    .contains("/statefulsets/demo-brokers")
+        })
+        .expect("post-drain StatefulSet shrink");
+    let body: serde_json::Value = serde_json::from_slice(statefulset_patch.body()).unwrap();
+    assert!(body["spec"]["replicas"] == 2);
+    assert!(state.remaining_rules() == 0);
+}
+
+#[tokio::test]
 async fn concurrent_shrink_and_add_cannot_reuse_live_statefulset_node_ids() {
     let parent = "demo";
     let namespace = "y";
@@ -1176,6 +1435,179 @@ async fn deleting_pool_removes_exact_committed_voter() {
             }
         ]
     ));
+    assert!(state.remaining_rules() == 0);
+}
+
+#[tokio::test]
+async fn deleting_broker_pool_with_data_keeps_pods_pvcs_and_finalizer() {
+    let parent = "demo";
+    let pool_name = "brokers";
+    let namespace = "y";
+    let sts_name = format!("{parent}-{pool_name}");
+    let mut observed_sts = fake_sts_body(&sts_name, namespace, 2, Some(2));
+    observed_sts["metadata"]["annotations"] = serde_json::json!({
+        "krabka.io/node-id-start": "0",
+        "krabka.io/process-roles": "broker",
+    });
+    let rules = vec![
+        MockRule {
+            method: Method::GET,
+            path_substr: format!("/kafkas/{parent}"),
+            response: json_response(200, &fake_parent_kafka_body(parent, namespace)),
+        },
+        MockRule {
+            method: Method::GET,
+            path_substr: format!("/statefulsets/{sts_name}"),
+            response: json_response(200, &observed_sts),
+        },
+        pod_list_rule(namespace, &["demo-brokers-0", "demo-brokers-1"]),
+        MockRule {
+            method: Method::GET,
+            path_substr: "/kafkarebalances/demo-brokers-drain-to-0".into(),
+            response: json_response(200, &ready_broker_drain(0, &[0, 1])),
+        },
+        MockRule {
+            method: Method::PATCH,
+            path_substr: format!("/kafkanodepools/{pool_name}/status"),
+            response: json_response(200, &fake_pool_body(pool_name, namespace, parent)),
+        },
+    ];
+    let state = MockState::new(rules);
+    let ctx = fixture_ctx(mock_client(&state, namespace), namespace);
+    let admin = Arc::new(tokio::sync::Mutex::new(
+        shared::fake_admin::FakeAdminClient::new(),
+    ));
+    admin
+        .lock()
+        .await
+        .set_partition_assignments(vec![PartitionAssignment {
+            topic: "orders".into(),
+            partition: 0,
+            replicas: vec![0, 1],
+            adding_replicas: Vec::new(),
+            removing_replicas: Vec::new(),
+        }]);
+    ctx.insert_admin_client_for_test(parent, admin.clone())
+        .await;
+    let mut pool = pool_cr(pool_name, namespace, Some(parent), 2);
+    pool.spec.roles = vec![NodeRole::Broker];
+    pool.spec.storage = Some(Storage::PersistentClaim(PersistentClaimSpec {
+        size: "10Gi".into(),
+        class: None,
+        delete_claim: true,
+    }));
+    pool.metadata.deletion_timestamp = Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
+        "2026-09-10T00:00:00Z".parse().unwrap(),
+    ));
+
+    reconcile(Arc::new(pool), Arc::new(ctx)).await.unwrap();
+
+    assert!(matches!(
+        admin.lock().await.calls().as_slice(),
+        [shared::fake_admin::RecordedCall::DescribePartitionAssignments(topics)] if topics.is_empty()
+    ));
+    let observed = state.take_observed();
+    assert!(observed.iter().all(|request| {
+        !(request.method() == Method::PATCH
+            && (request.uri().to_string().contains("/statefulsets/")
+                || (request.uri().path().ends_with("/kafkanodepools/brokers")
+                    && !request.uri().path().ends_with("/status"))))
+            && !(request.method() == Method::DELETE
+                && request.uri().to_string().contains("persistentvolumeclaims"))
+    }));
+    let status = observed
+        .iter()
+        .find(|request| request.uri().to_string().contains("/status"))
+        .expect("blocked deletion status");
+    let body: serde_json::Value = serde_json::from_slice(status.body()).unwrap();
+    assert!(body["status"]["conditions"][0]["reason"] == "BrokerDrainBlocked");
+    assert!(state.remaining_rules() == 0);
+}
+
+#[tokio::test]
+async fn deleting_broker_pool_scales_to_zero_only_after_drain_and_unregister() {
+    let parent = "demo";
+    let pool_name = "brokers";
+    let namespace = "y";
+    let sts_name = format!("{parent}-{pool_name}");
+    let mut observed_sts = fake_sts_body(&sts_name, namespace, 2, Some(2));
+    observed_sts["metadata"]["annotations"] = serde_json::json!({
+        "krabka.io/node-id-start": "0",
+        "krabka.io/process-roles": "broker",
+    });
+    let rules = vec![
+        MockRule {
+            method: Method::GET,
+            path_substr: format!("/kafkas/{parent}"),
+            response: json_response(200, &fake_parent_kafka_body(parent, namespace)),
+        },
+        MockRule {
+            method: Method::GET,
+            path_substr: format!("/statefulsets/{sts_name}"),
+            response: json_response(200, &observed_sts),
+        },
+        pod_list_rule(namespace, &["demo-brokers-0", "demo-brokers-1"]),
+        MockRule {
+            method: Method::GET,
+            path_substr: "/kafkarebalances/demo-brokers-drain-to-0".into(),
+            response: json_response(200, &ready_broker_drain(0, &[0, 1])),
+        },
+        MockRule {
+            method: Method::PATCH,
+            path_substr: format!("/statefulsets/{sts_name}"),
+            response: json_response(200, &fake_sts_body(&sts_name, namespace, 0, None)),
+        },
+    ];
+    let state = MockState::new(rules);
+    let ctx = fixture_ctx(mock_client(&state, namespace), namespace);
+    let admin = Arc::new(tokio::sync::Mutex::new(
+        shared::fake_admin::FakeAdminClient::new(),
+    ));
+    ctx.insert_admin_client_for_test(parent, admin.clone())
+        .await;
+    let mut pool = pool_cr(pool_name, namespace, Some(parent), 2);
+    pool.spec.roles = vec![NodeRole::Broker];
+    pool.spec.storage = Some(Storage::PersistentClaim(PersistentClaimSpec {
+        size: "10Gi".into(),
+        class: None,
+        delete_claim: true,
+    }));
+    pool.metadata.annotations = Some(BTreeMap::from([(
+        "krabka.io/unregistered-brokers".into(),
+        "0,1".into(),
+    )]));
+    pool.metadata.deletion_timestamp = Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
+        "2026-09-10T00:00:00Z".parse().unwrap(),
+    ));
+
+    reconcile(Arc::new(pool), Arc::new(ctx)).await.unwrap();
+
+    assert!(matches!(
+        admin.lock().await.calls().as_slice(),
+        [
+            shared::fake_admin::RecordedCall::DescribePartitionAssignments(_),
+            shared::fake_admin::RecordedCall::ListPartitionReassignments(_),
+        ]
+    ));
+    let observed = state.take_observed();
+    let scale_down = observed
+        .iter()
+        .find(|request| {
+            request.method() == Method::PATCH
+                && request
+                    .uri()
+                    .to_string()
+                    .contains("/statefulsets/demo-brokers")
+        })
+        .expect("post-drain scale to zero");
+    let body: serde_json::Value = serde_json::from_slice(scale_down.body()).unwrap();
+    assert!(body["spec"]["replicas"] == 0);
+    assert!(observed.iter().all(|request| {
+        !(request.method() == Method::PATCH
+            && request.uri().path().ends_with("/kafkanodepools/brokers"))
+            && !(request.method() == Method::DELETE
+                && request.uri().to_string().contains("persistentvolumeclaims"))
+    }));
     assert!(state.remaining_rules() == 0);
 }
 
