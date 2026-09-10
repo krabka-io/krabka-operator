@@ -85,6 +85,18 @@ spec:
   replicas: 3
 EOF
 kubectl wait kafkatopic/secured-admin-before-rotation --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=5m
+kubectl apply -f - <<EOF
+apiVersion: krabka.io/v1alpha1
+kind: KafkaUser
+metadata:
+  name: secured-admin-user
+  labels:
+    krabka.io/cluster: m20
+spec:
+  authentication:
+    type: scram-sha-512
+EOF
+kubectl wait kafkauser/secured-admin-user --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=5m
 
 old_operator_cert="$(kubectl get secret m20-operator-admin -o jsonpath='{.data.user\.crt}')"
 old_statefulset_generation="$(kubectl get statefulset m20-brokers -o jsonpath='{.metadata.generation}')"
@@ -121,10 +133,11 @@ EOF
 kubectl wait kafkatopic/secured-admin-after-rotation --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=5m
 kubectl get kafka m20 -o json >"${evidence}/kafka.json"
 kubectl get kafkanodepool brokers -o json >"${evidence}/pool.json"
+kubectl get kafkauser secured-admin-user -o json >"${evidence}/user.json"
 kubectl get statefulset m20-brokers -o json >"${evidence}/statefulset.json"
 kubectl get pods -o wide >"${evidence}/pods.txt"
 kubectl logs -n krabka-system -l app.kubernetes.io/name=krabka-operator --all-containers >"${evidence}/operator.log"
 printf '%s\n' "${old_operator_cert}" >"${evidence}/operator-cert-before.base64"
 printf '%s\n' "${new_operator_cert}" >"${evidence}/operator-cert-after.base64"
-(cd "${evidence}" && sha256sum kafka.json pool.json statefulset.json pods.txt operator.log operator-cert-*.base64 krabka-operator-*.tgz >SHA256SUMS)
+(cd "${evidence}" && sha256sum kafka.json pool.json user.json statefulset.json pods.txt operator.log operator-cert-*.base64 krabka-operator-*.tgz >SHA256SUMS)
 echo "PASS: mTLS operator admin survived clients-CA credential rotation"
