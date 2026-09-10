@@ -58,6 +58,8 @@ use crate::{
 /// place; referenced by `controller::metrics` to build the
 /// `PodMonitor` / `ServiceMonitor` endpoints.
 pub(crate) const METRICS_PORT: i32 = 9404;
+/// Broker-native `/healthz` and `/readyz` HTTP endpoint.
+pub(crate) const HEALTH_PORT: i32 = 9405;
 const FINALIZER: &str = "krabka.io/kafka-node-pool-finalizer";
 const MAX_NODE_ID: i32 = 999_999;
 const NODE_ID_START_ANNOTATION: &str = "krabka.io/node-id-start";
@@ -721,9 +723,14 @@ fn render_broker_container(spec: BrokerContainerSpec<'_>) -> serde_json::Value {
         tiered_storage.map(|t| t.kind),
         Some(TieredStorageType::Local)
     );
-    let mut ports = vec![json!({
-        "containerPort": BROKER_PORT, "name": "kafka-internal", "protocol": "TCP"
-    })];
+    let mut ports = vec![
+        json!({
+            "containerPort": BROKER_PORT, "name": "kafka-internal", "protocol": "TCP"
+        }),
+        json!({
+            "containerPort": HEALTH_PORT, "name": "health", "protocol": "TCP"
+        }),
+    ];
     if metrics_enabled {
         ports.push(json!({
             "containerPort": METRICS_PORT, "name": "metrics", "protocol": "TCP"
@@ -939,12 +946,12 @@ fn render_broker_container(spec: BrokerContainerSpec<'_>) -> serde_json::Value {
         "env": env,
         "ports": ports,
         "readinessProbe": {
-            "tcpSocket": { "port": BROKER_PORT },
+            "httpGet": { "path": "/readyz", "port": HEALTH_PORT },
             "initialDelaySeconds": 2,
             "periodSeconds": 5
         },
         "livenessProbe": {
-            "tcpSocket": { "port": BROKER_PORT },
+            "httpGet": { "path": "/healthz", "port": HEALTH_PORT },
             "initialDelaySeconds": 30,
             "periodSeconds": 10
         },
@@ -2683,6 +2690,94 @@ struct PoolReadinessInput<'a> {
     cluster: &'a str,
     name: &'a str,
     directory_ids: &'a BTreeMap<i32, uuid::Uuid>,
+    pods: &'a [Pod],
+    replication_metrics: bool,
+}
+
+fn prometheus_gauge(body: &str, name: &str) -> Option<i64> {
+    body.lines().find_map(|line| {
+        let (metric, value) = line.split_once(' ')?;
+        (metric == name).then(|| value.parse().ok()).flatten()
+    })
+}
+
+fn classify_replication_metrics(body: &str, broker: &str) -> Result<(), (&'static str, String)> {
+    for (metric, reason) in [
+        (
+            "krabka_broker_offline_partitions_count",
+            "OfflinePartitions",
+        ),
+        (
+            "krabka_broker_under_replicated_partitions",
+            "UnderReplicatedPartitions",
+        ),
+    ] {
+        match prometheus_gauge(body, metric) {
+            Some(0) => {}
+            Some(value) => {
+                return Err((reason, format!("broker {broker} reports {metric}={value}")));
+            }
+            None => {
+                return Err((
+                    "ReplicationHealthUnknown",
+                    format!("broker {broker} does not publish {metric}"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn broker_replication_health(
+    pods: &[Pod],
+    statefulset: &str,
+    replicas: i32,
+) -> Result<(), (&'static str, String)> {
+    let prefix = format!("{statefulset}-");
+    let addresses: Vec<&str> = pods
+        .iter()
+        .filter(|pod| pod.name_any().starts_with(&prefix))
+        .filter_map(|pod| pod.status.as_ref()?.pod_ip.as_deref())
+        .collect();
+    if addresses.len() != usize::try_from(replicas).unwrap_or(usize::MAX) {
+        return Err((
+            "ReplicationHealthUnknown",
+            format!("waiting for metrics addresses from all {replicas} broker pods"),
+        ));
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .expect("valid metrics HTTP client");
+    for address in addresses {
+        let body = client
+            .get(format!("http://{address}:{METRICS_PORT}/metrics"))
+            .send()
+            .await
+            .map_err(|error| {
+                (
+                    "ReplicationHealthUnknown",
+                    format!("broker {address} metrics request failed: {error}"),
+                )
+            })?
+            .error_for_status()
+            .map_err(|error| {
+                (
+                    "ReplicationHealthUnknown",
+                    format!("broker {address} metrics response failed: {error}"),
+                )
+            })?
+            .text()
+            .await
+            .map_err(|error| {
+                (
+                    "ReplicationHealthUnknown",
+                    format!("broker {address} metrics body failed: {error}"),
+                )
+            })?;
+        classify_replication_metrics(&body, address)?;
+    }
+    Ok(())
 }
 
 async fn evaluate_pool_readiness(
@@ -2692,6 +2787,14 @@ async fn evaluate_pool_readiness(
 ) -> (&'static str, &'static str, String) {
     if reason != "Available" {
         return ("False", reason, message);
+    }
+    if input.pool.spec.roles.contains(&NodeRole::Broker) && input.replication_metrics {
+        let statefulset = format!("{}-{}", input.cluster, input.name);
+        if let Err((reason, error)) =
+            broker_replication_health(input.pods, &statefulset, input.pool.spec.replicas).await
+        {
+            return ("False", reason, error);
+        }
     }
     if !input.pool.spec.roles.contains(&NodeRole::Controller) {
         return ("True", reason, message);
@@ -2941,6 +3044,8 @@ async fn reconcile_inner(
             cluster: &kafka_name,
             name: &name,
             directory_ids: &directory_ids,
+            pods: &topology_pods.items,
+            replication_metrics: parent.spec.metrics_config.is_some(),
         },
         reason,
         message,
@@ -4325,6 +4430,35 @@ mod tests {
     }
 
     #[test]
+    fn replication_metrics_are_fail_closed() {
+        let healthy = "# TYPE krabka_broker_offline_partitions_count gauge\n\
+            krabka_broker_offline_partitions_count 0\n\
+            krabka_broker_under_replicated_partitions 0\n";
+        assert!(classify_replication_metrics(healthy, "10.0.0.1").is_ok());
+
+        let under_replicated = healthy.replace(
+            "krabka_broker_under_replicated_partitions 0",
+            "krabka_broker_under_replicated_partitions 2",
+        );
+        assert!(
+            classify_replication_metrics(&under_replicated, "10.0.0.1")
+                == Err((
+                    "UnderReplicatedPartitions",
+                    "broker 10.0.0.1 reports krabka_broker_under_replicated_partitions=2"
+                        .to_string(),
+                ))
+        );
+        assert!(
+            classify_replication_metrics("krabka_broker_offline_partitions_count 0\n", "10.0.0.1",)
+                == Err((
+                    "ReplicationHealthUnknown",
+                    "broker 10.0.0.1 does not publish krabka_broker_under_replicated_partitions"
+                        .to_string(),
+                ))
+        );
+    }
+
+    #[test]
     fn build_main_script_appends_configured_client_policy_once() {
         let queue = krabka_client_core::ConnectionDispatchQueueCapacity::new(7).unwrap();
         let frame =
@@ -4529,12 +4663,20 @@ mod tests {
         assert!(parent.spec.metrics_config.is_none());
         let pool = pool_fixture("brokers", "demo", 1);
         let sts = render_statefulset(&parent, &pool, "img:latest").unwrap();
-        let ports = sts.spec.unwrap().template.spec.unwrap().containers[0]
-            .ports
-            .clone()
-            .unwrap();
-        assert!(ports.len() == 1);
+        let pod_spec = sts.spec.unwrap().template.spec.unwrap();
+        let container = &pod_spec.containers[0];
+        let ports = container.ports.as_ref().unwrap();
+        assert!(ports.len() == 2);
         assert!(ports[0].name.as_deref() == Some("kafka-internal"));
+        assert!(ports[1].name.as_deref() == Some("health"));
+        assert!(ports[1].container_port == HEALTH_PORT);
+
+        let readiness = serde_json::to_value(container.readiness_probe.as_ref().unwrap()).unwrap();
+        let liveness = serde_json::to_value(container.liveness_probe.as_ref().unwrap()).unwrap();
+        assert!(readiness["httpGet"]["path"] == "/readyz");
+        assert!(readiness["httpGet"]["port"] == HEALTH_PORT);
+        assert!(liveness["httpGet"]["path"] == "/healthz");
+        assert!(liveness["httpGet"]["port"] == HEALTH_PORT);
     }
 
     #[test]
@@ -4685,7 +4827,7 @@ mod tests {
             .ports
             .clone()
             .unwrap();
-        assert!(ports.len() == 2);
+        assert!(ports.len() == 3);
         assert!(
             ports
                 .iter()
