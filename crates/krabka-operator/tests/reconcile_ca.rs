@@ -678,12 +678,11 @@ async fn byo_mode_without_pre_existing_secrets_errors_gracefully() {
 //
 // Setup: one pool with nodeIdStart=0 (broker id 0) + pre-seeded keystore
 // containing a 5-day-valid leaf cert (within the default 30-day renewal
-// window). After reconcile, the keystore PATCH body must carry the same
-// cert bytes that were seeded.
+// window). After reconcile, the keystore PATCH body must carry a replacement.
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn reconciler_does_not_renew_valid_leaf_certs() {
+async fn reconciler_renews_leaf_inside_renewal_window() {
     let ns = "ns7";
     let name = "c7";
     let pool_name = "brokers";
@@ -703,7 +702,7 @@ async fn reconciler_does_not_renew_valid_leaf_certs() {
         krabka_security::ca::generate_clients_ca("c7-clients-ca", 365).expect("clients CA gen");
 
     // Issue a leaf cert for broker 0 with only 5 days validity — inside the
-    // 30-day renewal window. The reconciler must NOT replace it.
+    // 30-day renewal window. The reconciler must replace it.
     let leaf = krabka_security::ca::issue_broker_cert(
         &cluster_ca_mat.cert_pem,
         &cluster_ca_mat.key_pem,
@@ -893,8 +892,8 @@ async fn reconciler_does_not_renew_valid_leaf_certs() {
         .decode(patched_crt)
         .expect("0.crt is base64");
     assert!(
-        patched_bytes == original_bytes,
-        "reconciler must not replace an existing leaf cert; cert bytes must be identical"
+        patched_bytes != original_bytes,
+        "a leaf inside the renewal window must be reissued"
     );
 
     // Confirm no CA PATCHes happened (CAs were reused from existing Secrets).

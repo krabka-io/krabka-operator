@@ -1559,6 +1559,10 @@ pub struct KafkaStatus {
     /// Echo of `spec.kafkaVersion`, for observability.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kafka_version: Option<String>,
+    /// The metadata feature level requested by the current spec. This may be
+    /// newer than `metadataVersion` while broker pools are rolling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_metadata_version: Option<String>,
     /// The operator-finalized metadata version. On an existing cluster it
     /// advances only after `UpdateFeatures` accepts the requested level.
     #[serde(default, skip_serializing_if = "Option::is_none")]

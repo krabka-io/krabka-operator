@@ -18,9 +18,9 @@ use krabka_client_admin::{
     AclEntry, AclEntryFilter, AdminClientLike, AdminError, AlterConfigsOutcome, CreateAclOutcome,
     CreatePartitionsOp, CreatePartitionsOutcome, CreateTopicOutcome, CreateTopicSpec,
     DeleteAclFilterOutcome, DeleteRecordsOp, DeleteRecordsOutcome, DeleteTopicOutcome,
-    IncrementalAlterOp, KafkaError, MetadataQuorum, MetadataVersionUpdate, QuotaOp, ScramDeletion,
-    ScramUpsertion, ScramUserOutcome, TopicConfigOverrides, TopicMetadata, TopicMetadataEntry,
-    TopicReplicationStatus, UserQuotaConfig,
+    IncrementalAlterOp, KafkaError, MetadataQuorum, MetadataVersionUpdate, PartitionAssignment,
+    QuotaOp, ScramDeletion, ScramUpsertion, ScramUserOutcome, TopicConfigOverrides, TopicMetadata,
+    TopicMetadataEntry, TopicReplicationStatus, UserQuotaConfig,
 };
 use krabka_client_core::ClientError;
 use krabka_metadata::DelegationToken;
@@ -76,6 +76,9 @@ pub enum RecordedCall {
         node_id: i32,
         directory_id: uuid::Uuid,
     },
+    DescribePartitionAssignments(Vec<String>),
+    ListPartitionReassignments(BTreeMap<String, Vec<i32>>),
+    UnregisterBroker(i32),
     Metadata(Vec<String>),
     ReconcileTopicReplicationFactor {
         topic: String,
@@ -141,6 +144,8 @@ pub struct FakeAdminClient {
     pub topics: StdMutex<HashMap<String, TopicState>>,
     pub injected: StdMutex<InjectedErrors>,
     pub metadata_quorum: StdMutex<Option<MetadataQuorum>>,
+    pub partition_assignments: StdMutex<Vec<PartitionAssignment>>,
+    pub active_reassignments: StdMutex<Vec<PartitionAssignment>>,
     /// In-memory ACL store, keyed on the full tuple. Reconcile
     /// tests pre-seed this when verifying convergence; the trait
     /// implementations below diff against the live set.
@@ -179,6 +184,14 @@ impl FakeAdminClient {
 
     pub fn set_metadata_quorum(&self, quorum: MetadataQuorum) {
         *self.metadata_quorum.lock().unwrap() = Some(quorum);
+    }
+
+    pub fn set_partition_assignments(&self, assignments: Vec<PartitionAssignment>) {
+        *self.partition_assignments.lock().unwrap() = assignments;
+    }
+
+    pub fn set_active_reassignments(&self, assignments: Vec<PartitionAssignment>) {
+        *self.active_reassignments.lock().unwrap() = assignments;
     }
 
     pub fn retain_topics_after_delete_ack(&self) {
@@ -386,6 +399,39 @@ impl AdminClientLike for FakeAdminClient {
                 .voters
                 .retain(|voter| voter.node_id != node_id || voter.directory_id != directory_id);
         }
+        Ok(())
+    }
+
+    async fn describe_partition_assignments(
+        &mut self,
+        topics: &[&str],
+    ) -> Result<Vec<PartitionAssignment>, AdminError> {
+        self.recorded_calls
+            .lock()
+            .unwrap()
+            .push(RecordedCall::DescribePartitionAssignments(
+                topics.iter().map(|topic| (*topic).to_string()).collect(),
+            ));
+        Ok(self.partition_assignments.lock().unwrap().clone())
+    }
+
+    async fn list_partition_reassignments(
+        &mut self,
+        partitions: &BTreeMap<String, Vec<i32>>,
+        _timeout: Time,
+    ) -> Result<Vec<PartitionAssignment>, AdminError> {
+        self.recorded_calls
+            .lock()
+            .unwrap()
+            .push(RecordedCall::ListPartitionReassignments(partitions.clone()));
+        Ok(self.active_reassignments.lock().unwrap().clone())
+    }
+
+    async fn unregister_broker(&mut self, broker_id: i32) -> Result<(), AdminError> {
+        self.recorded_calls
+            .lock()
+            .unwrap()
+            .push(RecordedCall::UnregisterBroker(broker_id));
         Ok(())
     }
 

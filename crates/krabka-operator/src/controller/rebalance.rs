@@ -20,6 +20,7 @@
 use std::sync::Arc;
 
 use futures::StreamExt as _;
+use k8s_openapi::api::core::v1::Secret;
 use krabka_units::Time;
 use kube::{
     Resource, ResourceExt as _,
@@ -34,7 +35,7 @@ use serde_json::json;
 use crate::{
     context::Context,
     controller::common::{self, FIELD_MANAGER, ReconcileError, condition},
-    crd::{KafkaRebalance, OptimizationResult},
+    crd::{KafkaRebalance, KafkaRebalanceMode, OptimizationResult},
     rebalancer_client::{ProposalStatus, RebalancerError, RebalancerProposal},
 };
 
@@ -174,8 +175,8 @@ struct Outcome {
 
 impl Outcome {
     fn from_create(p: &RebalancerProposal, idle_interval: Time) -> Self {
-        if p.status == ProposalStatus::Computed {
-            Self {
+        match p.status {
+            ProposalStatus::Computed => Self {
                 state: RebalanceState::ProposalReady,
                 reason: "ProposalReady".into(),
                 message: format!(
@@ -186,9 +187,17 @@ impl Outcome {
                 new_session: Some(p.id.clone()),
                 new_optimization: Some(optimization_result_from(p)),
                 advance_generation: true,
-            }
-        } else {
-            Self {
+            },
+            ProposalStatus::Completed => Self {
+                state: RebalanceState::Ready,
+                reason: "AlreadyBalanced".into(),
+                message: format!("proposal {} required no movements", p.id),
+                requeue: idle_interval,
+                new_session: Some(p.id.clone()),
+                new_optimization: Some(optimization_result_from(p)),
+                advance_generation: true,
+            },
+            _ => Self {
                 state: RebalanceState::NotReady,
                 reason: "UnexpectedProposalStatus".into(),
                 message: format!("CreateProposal returned non-Computed status for {}", p.id),
@@ -196,7 +205,7 @@ impl Outcome {
                 new_session: Some(p.id.clone()),
                 new_optimization: None,
                 advance_generation: false,
-            }
+            },
         }
     }
 
@@ -274,6 +283,74 @@ impl Outcome {
             advance_generation: false,
         }
     }
+}
+
+struct CredentialFailure {
+    reason: &'static str,
+    message: String,
+}
+
+/// Read the remove-brokers bearer credential from a same-namespace Secret.
+/// An explicit reference wins; otherwise managed drains use the documented
+/// `<cluster>-rebalancer-auth` / `token` convention.
+async fn resolve_evacuation_credential(
+    obj: &KafkaRebalance,
+    namespace: &str,
+    ctx: &Context,
+) -> Result<Result<String, CredentialFailure>, ReconcileError> {
+    let reference = obj
+        .spec
+        .authorization_secret_ref
+        .as_ref()
+        .map(|reference| (reference.name.clone(), reference.key.clone()))
+        .or_else(|| {
+            obj.meta()
+                .labels
+                .as_ref()
+                .and_then(|labels| labels.get("krabka.io/cluster"))
+                .map(|cluster| (format!("{cluster}-rebalancer-auth"), "token".into()))
+        });
+    let Some((name, key)) = reference else {
+        return Ok(Err(CredentialFailure {
+            reason: "MissingAuthorizationSecretRef",
+            message:
+                "removeBrokers requires spec.authorizationSecretRef or a krabka.io/cluster label"
+                    .into(),
+        }));
+    };
+    let api: Api<Secret> = Api::namespaced(ctx.client.clone(), namespace);
+    let Some(secret) = api.get_opt(&name).await? else {
+        return Ok(Err(CredentialFailure {
+            reason: "MissingAuthorizationSecret",
+            message: format!("removeBrokers authorization Secret {name:?} was not found"),
+        }));
+    };
+    let Some(bytes) = secret.data.as_ref().and_then(|data| data.get(&key)) else {
+        return Ok(Err(CredentialFailure {
+            reason: "InvalidAuthorizationSecret",
+            message: format!("removeBrokers authorization Secret {name:?} has no key {key:?}"),
+        }));
+    };
+    let token = match String::from_utf8(bytes.0.clone()) {
+        Ok(token) if !token.is_empty() => token,
+        Ok(_) => {
+            return Ok(Err(CredentialFailure {
+                reason: "InvalidAuthorizationSecret",
+                message: format!(
+                    "removeBrokers authorization Secret {name:?} key {key:?} is empty"
+                ),
+            }));
+        }
+        Err(error) => {
+            return Ok(Err(CredentialFailure {
+                reason: "InvalidAuthorizationSecret",
+                message: format!(
+                    "removeBrokers authorization Secret {name:?} key {key:?} is not UTF-8: {error}"
+                ),
+            }));
+        }
+    };
+    Ok(Ok(token))
 }
 
 /// Project a rebalancer `Proposal` summary onto the CRD status type.
@@ -554,20 +631,56 @@ async fn reconcile_inner(
         return Ok(common::requeue(ctx.config.rebalancer_idle_interval));
     }
 
+    let bearer_token = if obj.spec.mode == KafkaRebalanceMode::RemoveBrokers
+        && matches!(
+            action,
+            RebalanceAction::CreateProposal | RebalanceAction::Execute
+        ) {
+        match resolve_evacuation_credential(&obj, &ns, &ctx).await? {
+            Ok(token) => Some(token),
+            Err(failure) => {
+                write_status(
+                    &api,
+                    &name,
+                    &obj,
+                    &Outcome::transient(
+                        RebalanceState::NotReady,
+                        failure.reason,
+                        failure.message,
+                        ctx.config.rebalancer_idle_interval,
+                    ),
+                )
+                .await?;
+                return Ok(common::requeue(ctx.config.rebalancer_idle_interval));
+            }
+        }
+    } else {
+        None
+    };
+
     // 4. Issue the RPC.
     let client = ctx.rebalancer_client_for(&endpoint).await;
     let rpc_result = match action {
         RebalanceAction::CreateProposal => {
             let goals = obj.spec.goals.clone().unwrap_or_default();
             client
-                .create_proposal(&goals)
+                .create_proposal(
+                    obj.spec.mode,
+                    &obj.spec.brokers,
+                    &goals,
+                    bearer_token.as_deref(),
+                )
                 .await
                 .map(|p| Outcome::from_create(&p, ctx.config.rebalancer_idle_interval))
         }
         RebalanceAction::Execute => {
             let id = session.clone().unwrap_or_default();
             client
-                .execute_proposal(&id, obj.spec.throttle_bytes_per_sec)
+                .execute_proposal(
+                    &id,
+                    obj.spec.throttle_bytes_per_sec,
+                    bearer_token.as_deref(),
+                )
                 .await
                 .map(|p| {
                     Outcome::from_execute_or_poll(
@@ -840,6 +953,15 @@ mod tests {
                 advance_generation: true,
             }
         );
+    }
+
+    #[test]
+    fn create_completed_no_op_becomes_ready() {
+        let o = Outcome::from_create(&proposal("p1", ProposalStatus::Completed), minutes(5));
+        assert!(o.state == RebalanceState::Ready);
+        assert!(o.reason == "AlreadyBalanced");
+        assert!(o.new_session.as_deref() == Some("p1"));
+        assert!(o.advance_generation);
     }
 
     #[test]

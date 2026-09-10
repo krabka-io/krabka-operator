@@ -12,10 +12,14 @@ use http::{Method, Request};
 use hyper::body::Bytes;
 use krabka_operator::{
     controller::rebalance::reconcile,
-    crd::{KafkaCondition, KafkaRebalance, KafkaRebalanceSpec, KafkaRebalanceStatus},
-    rebalancer_client::ProposalStatus,
+    crd::{
+        KafkaCondition, KafkaRebalance, KafkaRebalanceMode, KafkaRebalanceSpec,
+        KafkaRebalanceStatus, RebalancerAuthorizationSecretRef,
+    },
+    rebalancer_client::{ConnectRebalancerClient, ProposalStatus},
 };
-use krabka_units::mebibytes_per_sec;
+use krabka_units::{mebibytes_per_sec, secs};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 #[path = "shared/mod.rs"]
 mod shared;
@@ -85,6 +89,30 @@ fn annotation_rule(name: &str) -> MockRule {
     }
 }
 
+fn auth_secret_rule(name: &str) -> MockRule {
+    MockRule {
+        method: Method::GET,
+        path_substr: format!("/api/v1/namespaces/{NS}/secrets/{name}"),
+        response: json_response(
+            200,
+            &serde_json::json!({
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": { "name": name, "namespace": NS },
+                "data": { "token": "dGVzdC10b2tlbg==" }
+            }),
+        ),
+    }
+}
+
+fn use_remove_brokers_auth(kr: &mut KafkaRebalance) {
+    kr.spec.mode = KafkaRebalanceMode::RemoveBrokers;
+    kr.spec.authorization_secret_ref = Some(RebalancerAuthorizationSecretRef {
+        name: "demo-rebalancer-auth".into(),
+        key: "token".into(),
+    });
+}
+
 fn status_patch_body(observed: &[Request<Bytes>], name: &str) -> serde_json::Value {
     let suffix = format!("/kafkarebalances/{name}/status");
     let req = observed
@@ -99,7 +127,13 @@ fn status_patch_body(observed: &[Request<Bytes>], name: &str) -> serde_json::Val
 /// that the rebalancer returned.
 #[tokio::test]
 async fn new_rebalance_creates_proposal() {
-    let (ctx, state) = build_ctx(NS, vec![status_rule("demo")]);
+    let (ctx, state) = build_ctx(
+        NS,
+        vec![
+            auth_secret_rule("demo-rebalancer-auth"),
+            status_rule("demo"),
+        ],
+    );
     let fake = Arc::new(
         FakeRebalancerClient::new().with_create(FakeResp::Ok(fake_proposal(
             "p-new",
@@ -110,10 +144,19 @@ async fn new_rebalance_creates_proposal() {
         .await;
 
     let mut kr = rebalance("demo");
-    kr.spec.goals = Some(vec!["RackAware".into()]);
+    use_remove_brokers_auth(&mut kr);
+    kr.spec.brokers = vec![3, 4];
     reconcile(Arc::new(kr), ctx).await.unwrap();
 
-    assert!(fake.calls() == vec![RebalCall::CreateProposal(vec!["RackAware".into()])]);
+    assert!(
+        fake.calls()
+            == vec![RebalCall::CreateProposal {
+                mode: KafkaRebalanceMode::RemoveBrokers,
+                brokers: vec![3, 4],
+                goals: vec![],
+                authenticated: true,
+            }]
+    );
 
     let body = status_patch_body(&state.take_observed(), "demo");
     check!(body["status"]["conditions"][0]["type"] == "ProposalReady");
@@ -122,12 +165,80 @@ async fn new_rebalance_creates_proposal() {
     check!(body["status"]["observedGeneration"] == 1);
 }
 
+#[tokio::test]
+async fn remove_brokers_secret_reaches_real_client_as_bearer_header() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server_endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let resource_endpoint = "http://test-rebalancer.kafka.svc:9300";
+    let server = tokio::spawn(async move {
+        let (mut connection, _) = listener.accept().await.unwrap();
+        let mut request = vec![0; 8_192];
+        let read = connection.read(&mut request).await.unwrap();
+        request.truncate(read);
+        let body = r#"{"id":"p-auth","status":"PROPOSAL_STATUS_COMPUTED"}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        connection.write_all(response.as_bytes()).await.unwrap();
+        String::from_utf8(request).unwrap()
+    });
+    let (ctx, state) = build_ctx(
+        NS,
+        vec![
+            auth_secret_rule("demo-rebalancer-auth"),
+            status_rule("authenticated"),
+        ],
+    );
+    ctx.insert_rebalancer_client_for_test(
+        resource_endpoint,
+        Arc::new(ConnectRebalancerClient::new(&server_endpoint, secs(5))),
+    )
+    .await;
+    let mut kr = rebalance("authenticated");
+    kr.spec.endpoint = Some(resource_endpoint.into());
+    use_remove_brokers_auth(&mut kr);
+    kr.spec.brokers = vec![3];
+
+    tokio::time::timeout(
+        core::time::Duration::from_secs(5),
+        reconcile(Arc::new(kr), ctx),
+    )
+    .await
+    .expect("authenticated reconcile completes")
+    .unwrap();
+    let observed = state.take_observed();
+    let body = status_patch_body(&observed, "authenticated");
+    assert!(
+        body["status"]["conditions"][0]["type"] == "ProposalReady",
+        "status = {body}"
+    );
+
+    let request = tokio::time::timeout(core::time::Duration::from_secs(5), server)
+        .await
+        .expect("rebalancer receives request")
+        .unwrap();
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("\r\nauthorization: bearer test-token\r\n")
+    );
+    assert!(request.contains(r#""mode":"PROPOSAL_MODE_REMOVE_BROKERS""#));
+}
+
 /// `approve` on a `ProposalReady` proposal leads to `ExecuteProposal`,
 /// with the configured throttle, and then to `Rebalancing`. The controller
 /// consumes the annotation.
 #[tokio::test]
 async fn approve_executes_and_enters_rebalancing() {
-    let (ctx, state) = build_ctx(NS, vec![annotation_rule("demo"), status_rule("demo")]);
+    let (ctx, state) = build_ctx(
+        NS,
+        vec![
+            auth_secret_rule("demo-rebalancer-auth"),
+            annotation_rule("demo"),
+            status_rule("demo"),
+        ],
+    );
     let fake = Arc::new(
         FakeRebalancerClient::new()
             .with_execute(FakeResp::Ok(fake_proposal("p1", ProposalStatus::Executing))),
@@ -136,6 +247,7 @@ async fn approve_executes_and_enters_rebalancing() {
         .await;
 
     let mut kr = with_state(rebalance("demo"), "ProposalReady", Some("p1"));
+    use_remove_brokers_auth(&mut kr);
     kr.spec.throttle_bytes_per_sec = Some(mebibytes_per_sec(50));
     let kr = annotate(kr, "approve");
     reconcile(Arc::new(kr), ctx).await.unwrap();
@@ -145,6 +257,7 @@ async fn approve_executes_and_enters_rebalancing() {
             == vec![RebalCall::ExecuteProposal {
                 id: "p1".into(),
                 throttle: Some(mebibytes_per_sec(50)),
+                authenticated: true,
             }]
     );
 
@@ -249,6 +362,38 @@ async fn missing_endpoint_sets_not_ready() {
     assert!(body["status"]["conditions"][0]["reason"] == "MissingEndpoint");
 }
 
+#[tokio::test]
+async fn remove_brokers_without_authorization_secret_fails_closed() {
+    let missing_secret = MockRule {
+        method: Method::GET,
+        path_substr: format!("/api/v1/namespaces/{NS}/secrets/demo-rebalancer-auth"),
+        response: json_response(
+            404,
+            &serde_json::json!({
+                "apiVersion": "v1",
+                "kind": "Status",
+                "status": "Failure",
+                "reason": "NotFound",
+                "code": 404
+            }),
+        ),
+    };
+    let (ctx, state) = build_ctx(NS, vec![missing_secret, status_rule("demo")]);
+    let fake = Arc::new(FakeRebalancerClient::new());
+    ctx.insert_rebalancer_client_for_test(ENDPOINT, fake.clone())
+        .await;
+    let mut kr = rebalance("demo");
+    use_remove_brokers_auth(&mut kr);
+    kr.spec.brokers = vec![3];
+
+    reconcile(Arc::new(kr), ctx).await.unwrap();
+
+    assert!(fake.calls().is_empty());
+    let body = status_patch_body(&state.take_observed(), "demo");
+    assert!(body["status"]["conditions"][0]["type"] == "NotReady");
+    assert!(body["status"]["conditions"][0]["reason"] == "MissingAuthorizationSecret");
+}
+
 /// A transport error leaves the status unchanged and writes nothing to
 /// kube, so that the next reconcile tries again. A short transient failure
 /// therefore does not lose the proposal computation.
@@ -268,7 +413,15 @@ async fn transport_error_leaves_status_untouched() {
     let kr = rebalance("demo");
     let action = reconcile(Arc::new(kr), ctx).await.unwrap();
 
-    assert!(fake.calls() == vec![RebalCall::CreateProposal(vec![])]);
+    assert!(
+        fake.calls()
+            == vec![RebalCall::CreateProposal {
+                mode: KafkaRebalanceMode::Full,
+                brokers: vec![],
+                goals: vec![],
+                authenticated: false,
+            }]
+    );
     assert!(
         action
             == kube::runtime::controller::Action::requeue(std::time::Duration::from_millis(1_234))

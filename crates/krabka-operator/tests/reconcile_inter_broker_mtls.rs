@@ -264,6 +264,18 @@ fn pool_reconcile_rules(parent: &str, pool_name: &str, ns: &str) -> Vec<MockRule
             response: json_response(200, &shared::fake_sts_body(&sts_name, ns, 1, Some(0))),
         },
         MockRule {
+            method: Method::PATCH,
+            path_substr: format!("/poddisruptionbudgets/{sts_name}"),
+            response: json_response(
+                200,
+                &serde_json::json!({
+                    "apiVersion": "policy/v1",
+                    "kind": "PodDisruptionBudget",
+                    "metadata": { "name": sts_name, "namespace": ns }
+                }),
+            ),
+        },
+        MockRule {
             method: Method::GET,
             path_substr: format!("/statefulsets/{sts_name}"),
             response: json_response(200, &shared::fake_sts_body(&sts_name, ns, 1, Some(0))),

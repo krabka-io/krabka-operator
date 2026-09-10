@@ -955,6 +955,8 @@ pub(crate) struct BrokerKeystoreStatus {
     pub issued: Vec<i32>,
     pub reused: Vec<i32>,
     pub pruned: Vec<i32>,
+    /// Stable concatenation of the served leaf certificates, ordered by key.
+    pub leaf_material: String,
 }
 
 /// Per-broker cert request.
@@ -991,6 +993,13 @@ pub(crate) async fn ensure_broker_keystore(
             .as_ref()
             .map_or(365, |c| c.validity_days),
     );
+    let renewal = days(
+        kafka
+            .spec
+            .cluster_ca
+            .as_ref()
+            .map_or(30, |ca| ca.renewal_days),
+    );
 
     let existing = secret_api.get_opt(&name).await?;
     let mut data: BTreeMap<String, ByteString> = existing
@@ -1015,9 +1024,16 @@ pub(crate) async fn ensure_broker_keystore(
                 .ok()
                 .map(std::borrow::ToOwned::to_owned)
         });
+        let expiring = match data.get(&crt_key) {
+            Some(cert) => std::str::from_utf8(&cert.0).map_or(Ok(true), |pem| {
+                renew_if_expiring(pem, renewal, OffsetDateTime::now_utc())
+            })?,
+            None => true,
+        };
 
         let needs_reissue = force_reissue
             || !has_cert
+            || expiring
             || stored_digest.is_none()
             || stored_digest.as_deref() != Some(&requested_digest);
 
@@ -1064,6 +1080,14 @@ pub(crate) async fn ensure_broker_keystore(
         }
     });
     let pruned: Vec<i32> = pruned_ids.into_iter().collect();
+    let leaf_material = data.iter().filter(|(key, _)| key.ends_with(".crt")).fold(
+        String::new(),
+        |mut material, (_, value)| {
+            material.push('\x1E');
+            material.push_str(&String::from_utf8_lossy(&value.0));
+            material
+        },
+    );
 
     let mut labels = BTreeMap::new();
     labels.insert(
@@ -1098,6 +1122,7 @@ pub(crate) async fn ensure_broker_keystore(
         issued,
         reused,
         pruned,
+        leaf_material,
     })
 }
 

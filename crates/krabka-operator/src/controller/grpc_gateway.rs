@@ -2268,6 +2268,7 @@ mod tests {
         // KafkaVersionValid=True clears the gate.
         parent.status = Some(crate::crd::KafkaStatus {
             conditions: vec![condition("KafkaVersionValid", "True", "Valid", "ok")],
+            kafka_version: Some("0.1.1".into()),
             ..Default::default()
         });
         assert!(version_gate(&parent).is_none());

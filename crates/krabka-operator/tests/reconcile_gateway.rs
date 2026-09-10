@@ -553,6 +553,7 @@ async fn no_tls_listener_blocks_with_degraded_and_no_deployment() {
             ]
         },
         "status": {
+            "kafkaVersion": "0.1.1",
             "conditions": [{
                 "type": "KafkaVersionValid",
                 "status": "True",
