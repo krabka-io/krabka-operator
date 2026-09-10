@@ -195,7 +195,7 @@ async fn default_flow_creates_cluster_ca_clients_ca_and_broker_keystore() {
     let cm_name = format!("{name}-broker-config");
     let secret_name = format!("{name}-cluster-id");
 
-    let rules = vec![
+    let mut rules = vec![
         // 1. PATCH headless service
         MockRule {
             method: Method::PATCH,
@@ -272,6 +272,7 @@ async fn default_flow_creates_cluster_ca_clients_ca_and_broker_keystore() {
         },
     ];
 
+    rules.extend(shared::operator_admin_rules(name, ns));
     let (ctx, state) = build_ctx(ns, rules);
     let kafka = kafka_cr(name, ns);
     reconcile(Arc::new(kafka), ctx).await.unwrap();
@@ -378,7 +379,7 @@ async fn byo_mode_adopts_pre_existing_secrets_does_not_overwrite() {
     let clients_ca_mat =
         krabka_security::ca::generate_clients_ca("c5-clients-ca", 365).expect("clients CA gen");
 
-    let rules = vec![
+    let mut rules = vec![
         // 1. PATCH headless service
         MockRule {
             method: Method::PATCH,
@@ -461,6 +462,7 @@ async fn byo_mode_adopts_pre_existing_secrets_does_not_overwrite() {
         },
     ];
 
+    rules.extend(shared::operator_admin_rules(name, ns));
     let (ctx, state) = build_ctx(ns, rules);
     let kafka = kafka_cr_byo(name, ns);
     reconcile(Arc::new(kafka), ctx).await.unwrap();
@@ -768,7 +770,7 @@ async fn reconciler_renews_leaf_inside_renewal_window() {
         "status": { "conditions": [] }
     });
 
-    let rules = vec![
+    let mut rules = vec![
         // 1. PATCH headless service
         MockRule {
             method: Method::PATCH,
@@ -860,6 +862,7 @@ async fn reconciler_renews_leaf_inside_renewal_window() {
         },
     ];
 
+    rules.extend(shared::operator_admin_rules(name, ns));
     let (ctx, state) = build_ctx(ns, rules);
     let kafka = kafka_cr(name, ns);
     reconcile(Arc::new(kafka), ctx).await.unwrap();
@@ -1016,7 +1019,7 @@ async fn broker_leaf_certs_chain_to_cluster_ca() {
     let pool_one = pool_item(name, ns, pool_name, 0);
     let pool_resp = pool_body_resp(name, ns, pool_name, 0);
 
-    let rules = vec![
+    let mut rules = vec![
         MockRule {
             method: Method::PATCH,
             path_substr: format!("/services/{svc_name}"),
@@ -1090,6 +1093,7 @@ async fn broker_leaf_certs_chain_to_cluster_ca() {
         },
     ];
 
+    rules.extend(shared::operator_admin_rules(name, ns));
     let (ctx, state) = build_ctx(ns, rules);
     let kafka = kafka_cr_byo(name, ns);
     reconcile(Arc::new(kafka), ctx).await.unwrap();
@@ -1335,6 +1339,7 @@ async fn scale_up_adds_entries_does_not_reissue_existing() {
         response: json_response(200, &fake_kafka_body(name, ns)),
     });
 
+    rules.extend(shared::operator_admin_rules(name, ns));
     let (ctx, state) = build_ctx(ns, rules);
     let kafka = kafka_cr_byo(name, ns);
     reconcile(Arc::new(kafka), ctx).await.unwrap();
@@ -1538,6 +1543,7 @@ async fn scale_down_prunes_entries() {
         response: json_response(200, &fake_kafka_body(name, ns)),
     });
 
+    rules.extend(shared::operator_admin_rules(name, ns));
     let (ctx, state) = build_ctx(ns, rules);
     let kafka = kafka_cr_byo(name, ns);
     reconcile(Arc::new(kafka), ctx).await.unwrap();

@@ -144,6 +144,26 @@ pub fn fake_secret_body(name: &str, namespace: &str, cluster_id: &str) -> serde_
     })
 }
 
+pub fn operator_admin_rules(name: &str, namespace: &str) -> Vec<MockRule> {
+    let secret = format!("{name}-operator-admin");
+    vec![
+        MockRule {
+            method: Method::GET,
+            path_substr: format!("/secrets/{secret}"),
+            response: Response::builder()
+                .status(404)
+                .header("content-type", "application/json")
+                .body(not_found_body("not found"))
+                .expect("404"),
+        },
+        MockRule {
+            method: Method::PATCH,
+            path_substr: format!("/secrets/{secret}"),
+            response: json_response(200, &fake_secret_body(&secret, namespace, "")),
+        },
+    ]
+}
+
 /// JSON body shaped like an `apps/v1/StatefulSet`. `ready_replicas: None`
 /// produces a status without that field. Reconcile reads that as "0 ready".
 pub fn fake_sts_body(
@@ -561,6 +581,7 @@ pub fn happy_path_rules(
     let cluster_ca_cert = format!("{name}-cluster-ca-cert");
     let clients_ca_key = format!("{name}-clients-ca");
     let clients_ca_cert = format!("{name}-clients-ca-cert");
+    let operator_admin = format!("{name}-operator-admin");
     let keystore_name = format!("{name}-kafka-brokers");
 
     let mut rules = vec![
@@ -645,6 +666,20 @@ pub fn happy_path_rules(
             method: Method::PATCH,
             path_substr: format!("/secrets/{clients_ca_cert}"),
             response: json_response(200, &fake_ca_secret(&clients_ca_cert, namespace)),
+        },
+        MockRule {
+            method: Method::GET,
+            path_substr: format!("/secrets/{operator_admin}"),
+            response: Response::builder()
+                .status(404)
+                .header("content-type", "application/json")
+                .body(not_found_body("not found"))
+                .expect("404"),
+        },
+        MockRule {
+            method: Method::PATCH,
+            path_substr: format!("/secrets/{operator_admin}"),
+            response: json_response(200, &fake_secret_body(&operator_admin, namespace, "")),
         },
         MockRule {
             method: Method::GET,

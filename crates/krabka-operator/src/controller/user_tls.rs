@@ -24,7 +24,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use crate::{
     controller::{
         cluster_ca::{self, WhichCa},
-        common::{FIELD_MANAGER, ReconcileError, read_pem_key},
+        common::{FIELD_MANAGER, ReconcileError, owner_ref, read_pem_key},
     },
     crd::{Authentication, Kafka, KafkaUser, user::TlsAuth},
 };
@@ -35,6 +35,108 @@ pub(crate) const DEFAULT_VALIDITY_DAYS: u32 = 365;
 /// Default renewal window in days, used when `TlsAuth::renewal_days` is
 /// absent.
 pub(crate) const DEFAULT_RENEWAL_DAYS: u32 = 30;
+// `@` is forbidden in Kubernetes object names, so no KafkaUser can ever
+// receive this certificate subject.
+pub(crate) const OPERATOR_IDENTITY: &str = "krabka-operator@internal";
+
+#[must_use]
+pub(crate) fn operator_secret_name(cluster: &str) -> String {
+    format!("{cluster}-operator-admin")
+}
+
+/// Reconciles the operator's mTLS identity against the active clients CA.
+/// The trust bundle is updated before an old CA is pruned, while the leaf is
+/// replaced whenever its signer changes or it enters the renewal window.
+pub(crate) async fn ensure_operator_cert_secret(
+    secret_api: &Api<Secret>,
+    kafka: &Kafka,
+    clients_ca_material: &CaMaterial,
+    broker_trust_bundle_pem: &str,
+) -> Result<UserCertStatus, ReconcileError> {
+    let name = operator_secret_name(&kafka.name_any());
+    if let Some(existing) = secret_api.get_opt(&name).await?
+        && let Some(not_after) = read_user_cert_not_after(&existing)
+        && !is_cert_expiring_soon(&not_after, DEFAULT_RENEWAL_DAYS, OffsetDateTime::now_utc())
+        && read_pem_key(&existing, "user.crt").is_some_and(|cert| {
+            cert_is_signed_by(&cert, &clients_ca_material.cert_pem)
+                && cert_common_name(&cert).as_deref() == Some(OPERATOR_IDENTITY)
+        })
+    {
+        if read_pem_key(&existing, "ca.crt").as_deref() != Some(broker_trust_bundle_pem) {
+            let patch = Secret {
+                data: Some(
+                    [(
+                        "ca.crt".into(),
+                        ByteString(broker_trust_bundle_pem.as_bytes().to_vec()),
+                    )]
+                    .into(),
+                ),
+                ..Default::default()
+            };
+            secret_api
+                .patch(&name, &PatchParams::default(), &Patch::Merge(&patch))
+                .await?;
+        }
+        return Ok(UserCertStatus {
+            not_after: format_rfc3339(not_after)?,
+            issued_new: false,
+        });
+    }
+
+    let cert = ca::issue_user_cert(
+        &clients_ca_material.cert_pem,
+        &clients_ca_material.key_pem,
+        OPERATOR_IDENTITY,
+        DEFAULT_VALIDITY_DAYS,
+    )?;
+    let labels = [
+        (
+            "app.kubernetes.io/managed-by".into(),
+            "krabka-operator".into(),
+        ),
+        ("krabka.io/cluster".into(), kafka.name_any()),
+        ("krabka.io/auth".into(), "tls".into()),
+    ]
+    .into();
+    let data = [
+        (
+            "user.crt".into(),
+            ByteString(cert.cert_pem.as_bytes().to_vec()),
+        ),
+        (
+            "user.key".into(),
+            ByteString(cert.key_pem.as_bytes().to_vec()),
+        ),
+        (
+            "ca.crt".into(),
+            ByteString(broker_trust_bundle_pem.as_bytes().to_vec()),
+        ),
+    ]
+    .into();
+    let secret = Secret {
+        metadata: ObjectMeta {
+            name: Some(name.clone()),
+            namespace: kafka.namespace(),
+            labels: Some(labels),
+            owner_references: Some(vec![owner_ref::<Kafka>(kafka)?]),
+            ..Default::default()
+        },
+        type_: Some("Opaque".into()),
+        data: Some(data),
+        ..Default::default()
+    };
+    secret_api
+        .patch(
+            &name,
+            &PatchParams::apply(FIELD_MANAGER).force(),
+            &Patch::Apply(&secret),
+        )
+        .await?;
+    Ok(UserCertStatus {
+        not_after: cert.not_after,
+        issued_new: true,
+    })
+}
 
 /// Outcome of `ensure_user_cert_secret`. The status update reads it.
 #[derive(Debug, Clone)]
@@ -229,6 +331,18 @@ fn cert_is_signed_by(cert_pem: &str, ca_cert_pem: &str) -> bool {
     cert.verify_signature(Some(ca.public_key())).is_ok()
 }
 
+fn cert_common_name(pem: &str) -> Option<String> {
+    use x509_parser::pem::parse_x509_pem;
+    let (_, pem) = parse_x509_pem(pem.as_bytes()).ok()?;
+    let cert = pem.parse_x509().ok()?;
+    cert.subject()
+        .iter_common_name()
+        .next()?
+        .as_str()
+        .ok()
+        .map(str::to_owned)
+}
+
 fn render_user_cert_secret(
     obj: &KafkaUser,
     user_cert: &ca::UserCert,
@@ -337,6 +451,14 @@ mod tests {
             delta <= 5,
             "notAfter delta {delta}s exceeds ±5s tolerance (parsed={parsed}, expected={expected})"
         );
+    }
+
+    #[test]
+    fn certificate_common_name_is_verified() {
+        let ca = ca::generate_clients_ca("test-root", 365).expect("ca");
+        let cert =
+            ca::issue_user_cert(&ca.cert_pem, &ca.key_pem, OPERATOR_IDENTITY, 365).expect("leaf");
+        assert!(cert_common_name(&cert.cert_pem).as_deref() == Some(OPERATOR_IDENTITY));
     }
 
     #[test]

@@ -1,7 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
+use k8s_openapi::api::core::v1::Secret;
 use krabka_client_admin::{AdminClient, AdminClientLike};
-use kube::Client;
+use krabka_security::ListenerProtocol;
+use kube::{Api, Client};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -40,6 +42,8 @@ pub struct Context {
     /// Per-cluster-and-endpoint admin-client cache.
     /// The cache replaces a broken connection at the next use.
     pub admin_clients: Arc<Mutex<HashMap<String, AdminClientHandle>>>,
+    /// Keeps the on-disk TLS material alive for lazily connected admin clients.
+    admin_client_material: Arc<Mutex<HashMap<String, tempfile::TempDir>>>,
     /// Per-endpoint rebalancer-client cache, keyed by the resolved Connect
     /// base URL. The cache drops an entry after a transport failure and
     /// builds it again at the next use.
@@ -61,6 +65,7 @@ impl Context {
             registry,
             metrics,
             admin_clients: Arc::new(Mutex::new(HashMap::new())),
+            admin_client_material: Arc::new(Mutex::new(HashMap::new())),
             rebalancer_clients: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -74,13 +79,64 @@ impl Context {
     /// is out of range, or if the connection to `bootstrap` fails.
     pub async fn admin_client_for(
         &self,
+        namespace: &str,
         cluster: &str,
         bootstrap: &str,
     ) -> Result<AdminClientHandle, krabka_client_admin::AdminError> {
+        if let Some(client) = self.admin_clients.lock().await.get(cluster).cloned() {
+            return Ok(client);
+        }
+        let secret_name = crate::controller::user_tls::operator_secret_name(cluster);
+        let secret = Api::<Secret>::namespaced(self.client.clone(), namespace)
+            .get(&secret_name)
+            .await
+            .map_err(|error| {
+                krabka_client_admin::AdminError::Protocol(format!(
+                    "operator identity Secret {namespace}/{secret_name}: {error}"
+                ))
+            })?;
+        let version = secret
+            .metadata
+            .resource_version
+            .as_deref()
+            .unwrap_or("unknown");
         let mut map = self.admin_clients.lock().await;
-        let key = format!("{cluster}\0{bootstrap}");
+        let prefix = format!("{cluster}\0{namespace}\0{bootstrap}\0");
+        let key = format!("{prefix}{version}");
         if let Some(client) = map.get(&key).or_else(|| map.get(cluster)) {
             return Ok(client.clone());
+        }
+        let data = secret.data.as_ref().ok_or_else(|| {
+            krabka_client_admin::AdminError::Protocol(format!(
+                "operator identity Secret {namespace}/{secret_name} has no data"
+            ))
+        })?;
+        let value = |name: &str| {
+            data.get(name)
+                .map(|value| value.0.as_slice())
+                .ok_or_else(|| {
+                    krabka_client_admin::AdminError::Protocol(format!(
+                        "operator identity Secret {namespace}/{secret_name} has no {name}"
+                    ))
+                })
+        };
+        let material = tempfile::tempdir().map_err(|error| {
+            krabka_client_admin::AdminError::Protocol(format!("operator identity tempdir: {error}"))
+        })?;
+        let ca_path = material.path().join("ca.crt");
+        let cert_path = material.path().join("user.crt");
+        let key_path = material.path().join("user.key");
+        for (path, bytes) in [
+            (&ca_path, value("ca.crt")?),
+            (&cert_path, value("user.crt")?),
+            (&key_path, value("user.key")?),
+        ] {
+            std::fs::write(path, bytes).map_err(|error| {
+                krabka_client_admin::AdminError::Protocol(format!(
+                    "write operator identity {}: {error}",
+                    path.display()
+                ))
+            })?;
         }
         let admin = AdminClient::connect_with_options(
             &[bootstrap.to_string()],
@@ -93,12 +149,28 @@ impl Context {
                     self.config.client_frame_max,
                 )
                 .map_err(krabka_client_admin::AdminError::Protocol)?,
+                security: Some(Box::new(krabka_client_core::ClientSecurity {
+                    protocol: ListenerProtocol::Ssl,
+                    tls: Some(krabka_client_core::TlsConnectorConfig {
+                        trust_roots_pem: Some(ca_path),
+                        server_name: format!(
+                            "{cluster}-broker-headless.{namespace}.svc.cluster.local"
+                        ),
+                        client_identity: Some((cert_path, key_path)),
+                    }),
+                    sasl: None,
+                    sasl_host: None,
+                })),
                 ..krabka_client_core::ConnectionOptions::default()
             },
         )
         .await?;
         let entry: AdminClientHandle = Arc::new(Mutex::new(admin));
-        map.insert(key, entry.clone());
+        map.retain(|cached, _| !cached.starts_with(&prefix));
+        map.insert(key.clone(), entry.clone());
+        let mut materials = self.admin_client_material.lock().await;
+        materials.retain(|cached, _| !cached.starts_with(&prefix));
+        materials.insert(key, material);
         Ok(entry)
     }
 
@@ -109,6 +181,8 @@ impl Context {
     pub async fn drop_admin_client(&self, cluster: &str) {
         let mut clients = self.admin_clients.lock().await;
         clients.retain(|key, _| key != cluster && !key.starts_with(&format!("{cluster}\0")));
+        let mut materials = self.admin_client_material.lock().await;
+        materials.retain(|key, _| !key.starts_with(&format!("{cluster}\0")));
     }
 
     /// Fills the admin-client cache with a handle from the caller. This is

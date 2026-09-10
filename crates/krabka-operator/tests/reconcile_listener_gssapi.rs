@@ -414,8 +414,8 @@ async fn gssapi_listener_renders_gssapi_toml_block_and_mechanism() {
         "c1",
         "ns1",
         vec![
-            plain_listener("plain", 9091),
-            gssapi_listener("gss", 9092, false),
+            plain_listener("plain", 9092),
+            gssapi_listener("gss", 9094, false),
         ],
     );
     kafka.spec.inter_broker_listener_name = Some("plain".into());

@@ -5,10 +5,14 @@ image:
 
 # Default broker image used when a Kafka CR doesn't override it.
 brokerImage:
-  repository: ghcr.io/krabka-io/krabka-operator-broker
+  repository: ghcr.io/krabka-io/krabka-broker
   tag: "" # defaults to .Chart.AppVersion when empty
-  digest: "" # when set, wins over tag
+  digest: "sha256:15851611a7d5df6e20d3f9bd85b3821ca2dd52d5ca6f4042f5a4cfe0a3a1ab89" # v0.5.4; wins over tag
   pullPolicy: IfNotPresent
+
+# Digest-pinned shell copied into distroless broker pods. Override with an
+# internal mirror in air-gapped clusters.
+shellImage: busybox@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
 
 # Default gateway image used when a KafkaGrpcGateway CR doesn't override it.
 gatewayImage:

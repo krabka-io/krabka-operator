@@ -92,8 +92,8 @@ fn broker_0_toml_from_observed(
 /// `authorization: { type: opa, url, superUsers: ["ANONYMOUS"] }` must
 /// give a broker `ConfigMap` whose `broker-0.toml` data field carries the
 /// `[authorization]` block. That block must hold `type = "opa"`,
-/// `super_users = ["ANONYMOUS"]`, and a nested `[authorization.opa]` table
-/// with the configured `url`.
+/// `super_users = ["ANONYMOUS", "User:CN=krabka-operator"]`, and a nested
+/// `[authorization.opa]` table with the configured `url`.
 #[tokio::test]
 async fn kafka_with_opa_authorization_renders_correct_broker_toml() {
     let items = vec![fake_pool_list_item("brokers", "y", "c1", 1, 1)];
@@ -120,7 +120,7 @@ async fn kafka_with_opa_authorization_renders_correct_broker_toml() {
     for needle in [
         "[authorization]",
         "type = \"opa\"",
-        "super_users = [\"ANONYMOUS\"]",
+        "super_users = [\"ANONYMOUS\", \"User:CN=krabka-operator\"]",
         "[authorization.opa]",
         "url = \"http://opa:8181/v1/data/k/a\"",
     ] {
@@ -139,7 +139,13 @@ async fn kafka_with_opa_authorization_renders_correct_broker_toml() {
         .opa
         .expect("FileConfig.authorization.opa must be Some for type = \"opa\"");
     assert!(opa.url == "http://opa:8181/v1/data/k/a");
-    assert!(a.super_users == vec!["ANONYMOUS".to_string()]);
+    assert!(
+        a.super_users
+            == vec![
+                "ANONYMOUS".to_string(),
+                "User:CN=krabka-operator".to_string()
+            ]
+    );
 }
 
 // ── test 2: type: simple round-trips super_users ─────────────────────────────
@@ -147,8 +153,8 @@ async fn kafka_with_opa_authorization_renders_correct_broker_toml() {
 /// A `Kafka` spec with
 /// `authorization: { type: simple, superUsers: ["User:admin"] }` must give
 /// a broker `ConfigMap` whose `broker-0.toml` carries `[authorization]`
-/// with `type = "simple"` and `super_users = ["User:admin"]`. No
-/// `[authorization.opa]` subtable may appear.
+/// with `type = "simple"` and the configured user plus the operator identity.
+/// No `[authorization.opa]` subtable may appear.
 #[tokio::test]
 async fn kafka_with_simple_authorization_super_users_round_trip() {
     let items = vec![fake_pool_list_item("brokers", "y", "c1", 1, 1)];
@@ -171,7 +177,10 @@ async fn kafka_with_simple_authorization_super_users_round_trip() {
     for (needle, want) in [
         ("[authorization]", true),
         ("type = \"simple\"", true),
-        ("super_users = [\"User:admin\"]", true),
+        (
+            "super_users = [\"User:admin\", \"User:CN=krabka-operator\"]",
+            true,
+        ),
         ("[authorization.opa]", false),
     ] {
         assert!(
@@ -190,5 +199,11 @@ async fn kafka_with_simple_authorization_super_users_round_trip() {
         a.opa.is_none(),
         "FileConfig.authorization.opa must be None for type = \"simple\""
     );
-    assert!(a.super_users == vec!["User:admin".to_string()]);
+    assert!(
+        a.super_users
+            == vec![
+                "User:admin".to_string(),
+                "User:CN=krabka-operator".to_string()
+            ]
+    );
 }

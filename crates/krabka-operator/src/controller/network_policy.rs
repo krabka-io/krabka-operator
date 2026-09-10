@@ -78,7 +78,7 @@ pub(crate) fn render_network_policy(
             match_labels: Some(operator_match),
             match_expressions: None,
         }),
-        namespace_selector: None,
+        namespace_selector: Some(LabelSelector::default()),
         ip_block: None,
     };
 
@@ -119,7 +119,18 @@ pub(crate) fn render_network_policy(
     //    None → allow-all (rule with empty `from`).
     //    Some([]) → skip (default-deny applies to that port).
     //    Some(peers) → convert to k8s peers + restrict.
+    let default_listeners = [crate::controller::listeners::synthesized_default_listener()];
+    let operator_name =
+        crate::controller::listeners::operator_listener(if owner.spec.listeners.is_empty() {
+            &default_listeners
+        } else {
+            &owner.spec.listeners
+        })
+        .name;
     for l in effective_listeners {
+        if l.name == operator_name {
+            continue;
+        }
         let rule_from = match l.network_policy_peers.as_deref() {
             None => Some(vec![]),
             Some([]) => continue,
@@ -353,6 +364,26 @@ mod tests {
             ports.contains(&9092) && ports.contains(&9094),
             "ports={ports:?}"
         );
+    }
+
+    #[test]
+    fn operator_listener_has_no_allow_all_rule() {
+        let kafka = test_kafka();
+        let base = [internal_listener("PLAIN", 9092, None)];
+        let mut listeners = base.to_vec();
+        listeners.push(crate::controller::listeners::operator_listener(&base));
+        let np = render_network_policy(&kafka, &listeners, 9092, false).unwrap();
+        let rules = rules_targeting_port(&np, crate::controller::listeners::OPERATOR_LISTENER_PORT);
+        assert!(
+            rules
+                .iter()
+                .all(|rule| rule.from.as_ref().is_some_and(|from| !from.is_empty()))
+        );
+        assert!(rules.iter().any(|rule| {
+            rule.from
+                .as_ref()
+                .is_some_and(|from| from.iter().any(|peer| peer.namespace_selector.is_some()))
+        }));
     }
 
     #[test]

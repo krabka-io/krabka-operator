@@ -52,10 +52,10 @@ use crate::{
         kafka_node_pool,
         listeners::{
             self, AdvertisedAddress, INGRESS_PORT, compute_advertised,
-            effective_inter_broker_listener_name, ingress_bootstrap_host, render_bootstrap_ingress,
-            render_bootstrap_route, render_bootstrap_service, render_broker_ingress,
-            render_broker_route, render_broker_service, synthesized_default_listener,
-            validate_listeners,
+            effective_inter_broker_listener_name, ingress_bootstrap_host, operator_listener,
+            render_bootstrap_ingress, render_bootstrap_route, render_bootstrap_service,
+            render_broker_ingress, render_broker_route, render_broker_service,
+            synthesized_default_listener, validate_listeners,
         },
         logging, network_policy, user_tls,
     },
@@ -1092,6 +1092,14 @@ async fn reconcile_cas(input: CaPhaseInput<'_>) -> Result<CaPhaseResult, Reconci
     // managed TLS-user Secrets. A prune may patch the CA Secret successfully
     // and then fail on one user; the next pass is still required to repair it
     // even though the one-pass `pruned_old_trust` signal is gone.
+    user_tls::ensure_operator_cert_secret(
+        secret_api,
+        obj,
+        &clients_ca_outcome.signing_material,
+        &cluster_ca_outcome.trust_bundle_pem,
+    )
+    .await?;
+
     let sync_tls_user_secrets = clients_ca_outcome.leaf_transition.requires_reissue()
         || clients_ca_outcome.leaf_transition.pruned_old_trust()
         || clients_ca_outcome.cert_generation.0 > 0
@@ -1170,10 +1178,13 @@ async fn reconcile_cas(input: CaPhaseInput<'_>) -> Result<CaPhaseResult, Reconci
     // roll gate before any user certificate switches to the new signing key.
     // Idle clients-CA renewals remain hot-reload-only.
     let ca_trust = if clients_ca_outcome.phase == cluster_ca::CaPhase::Idle {
-        cluster_ca_outcome.trust_bundle_pem.clone()
+        format!(
+            "{}\x1Eoperator-admin-mtls-v1",
+            cluster_ca_outcome.trust_bundle_pem
+        )
     } else {
         format!(
-            "{}\x1E{}",
+            "{}\x1E{}\x1Eoperator-admin-mtls-v1",
             cluster_ca_outcome.trust_bundle_pem, clients_ca_outcome.trust_bundle_pem
         )
     };
@@ -1977,7 +1988,7 @@ async fn reconcile_metadata_version(
 
     let bootstrap = format!("{name}-broker-headless.{namespace}.svc.cluster.local:{port}");
     let admin = ctx
-        .admin_client_for(name, &bootstrap)
+        .admin_client_for(namespace, name, &bootstrap)
         .await
         .map_err(|error| {
             condition(
@@ -2020,18 +2031,19 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
     //    an empty per-broker ConfigMap so existing TOML keys reflect
     //    "no broker should boot". The spec describes this as
     //    "existing objects are not deleted; surface the error and wait."
-    let validation = validate_listeners(
-        &obj.spec.listeners,
-        obj.spec.inter_broker_listener_name.as_deref(),
-    );
-
     // Effective listeners: synthesize the default when
-    // `spec.listeners` is empty.
-    let effective_listeners: Vec<Listener> = if obj.spec.listeners.is_empty() {
+    // `spec.listeners` is empty, then add the reserved mTLS-only operator
+    // endpoint. User traffic never needs the operator credential.
+    let mut effective_listeners: Vec<Listener> = if obj.spec.listeners.is_empty() {
         vec![synthesized_default_listener()]
     } else {
         obj.spec.listeners.clone()
     };
+    let validation = validate_listeners(
+        &effective_listeners,
+        obj.spec.inter_broker_listener_name.as_deref(),
+    );
+    effective_listeners.push(operator_listener(&effective_listeners));
     let inter_broker_name = effective_inter_broker_listener_name(
         &obj.spec.listeners,
         obj.spec.inter_broker_listener_name.as_deref(),
@@ -2067,8 +2079,8 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
     let target_metadata = resolved_metadata.clone();
     let inter_broker_port = effective_listeners
         .iter()
-        .find(|listener| listener.name == inter_broker_name)
-        .map_or(common::BROKER_PORT, |listener| listener.port);
+        .find(|listener| listener.name == listeners::OPERATOR_LISTENER_NAME)
+        .map_or(listeners::OPERATOR_LISTENER_PORT, |listener| listener.port);
     let pools_rolled =
         pools_rolled_to_version(&pools.items, &statefulsets.items, &obj.spec.kafka_version);
     let (version_cond, resolved_metadata, finalize_failed) = match reconcile_metadata_version(

@@ -2982,7 +2982,7 @@ pub struct BrokerTlsRender {
 /// Intermediate shape that renders the `[authorization]` TOML block.
 ///
 /// [`AuthorizationRender::from_spec`] and
-/// [`AuthorizationRender::auto_injected_simple`] build it from
+/// [`AuthorizationRender::operator_simple`] build it from
 /// `Kafka.spec.authorization` and the delegation-token enablement flag.
 struct AuthorizationRender {
     /// `"simple"` or `"opa"`. These match the `AuthzType` wire names of
@@ -3013,21 +3013,19 @@ struct AuthorizationOpaRender {
 impl AuthorizationRender {
     /// Builds the render from an explicit `Kafka.spec.authorization`.
     ///
-    /// When `delegation_token_enabled` is set, this function merges
-    /// `"ANONYMOUS"` into `super_users`. The merge removes duplicates and
-    /// keeps the order. The delegation-token act-as path needs the
-    /// PLAINTEXT inter-broker principal of the operator to be a
-    /// super-user.
-    fn from_spec(a: &crate::crd::kafka::Authorization, delegation_token_enabled: bool) -> Self {
+    /// The operator's authenticated mTLS principal is always appended so its
+    /// admin API calls bypass user-managed ACLs without weakening anonymous
+    /// clients.
+    fn from_spec(a: &crate::crd::kafka::Authorization) -> Self {
         match a {
             crate::crd::kafka::Authorization::Simple(s) => Self {
                 kind: "simple",
-                super_users: merge_anonymous(&s.super_users, delegation_token_enabled),
+                super_users: merge_operator_principal(&s.super_users),
                 opa: None,
             },
             crate::crd::kafka::Authorization::Opa(o) => Self {
                 kind: "opa",
-                super_users: merge_anonymous(&o.super_users, delegation_token_enabled),
+                super_users: merge_operator_principal(&o.super_users),
                 opa: Some(AuthorizationOpaRender {
                     url: o.url.clone(),
                     allow_on_error: o.allow_on_error,
@@ -3040,28 +3038,24 @@ impl AuthorizationRender {
 
     /// Builds the injected default authorization block.
     ///
-    /// When `delegation_token_enabled` is set but
-    /// `Kafka.spec.authorization` is unset, the operator injects a
-    /// `type = "simple", super_users = ["ANONYMOUS"]` block without a
-    /// message, so that the act-as path continues to work. The spec
-    /// documents this in §2.2.
-    fn auto_injected_simple() -> Self {
+    /// Builds the minimal authorizer required for delegation-token act-as.
+    fn operator_simple() -> Self {
         Self {
             kind: "simple",
-            super_users: vec!["ANONYMOUS".to_string()],
+            super_users: vec![crate::controller::user_tls::tls_principal(
+                crate::controller::user_tls::OPERATOR_IDENTITY,
+            )],
             opa: None,
         }
     }
 }
 
-/// Merges `"ANONYMOUS"` into `base` when `inject` is set.
-///
-/// The merge keeps the order of `base` and removes duplicates. If `base`
-/// already holds `"ANONYMOUS"`, the merge changes nothing.
-fn merge_anonymous(base: &[String], inject: bool) -> Vec<String> {
+fn merge_operator_principal(base: &[String]) -> Vec<String> {
     let mut out: Vec<String> = base.to_vec();
-    if inject && !out.iter().any(|s| s == "ANONYMOUS") {
-        out.push("ANONYMOUS".to_string());
+    let principal =
+        crate::controller::user_tls::tls_principal(crate::controller::user_tls::OPERATOR_IDENTITY);
+    if !out.contains(&principal) {
+        out.push(principal);
     }
     out
 }
@@ -3407,33 +3401,16 @@ pub fn render_broker_toml(
 
     render_remote_storage(&mut out, tiered_storage);
 
-    // `[authorization]` block. Folds in the
-    // `super_users = ["ANONYMOUS"]` hack — the broker now consumes
-    // super-users exclusively via `[authorization].super_users` when the
-    // block is present.
-    //
-    // Rules:
-    //   * `authorization = Some(Simple { super_users })` → render
-    //     `type = "simple"` with the spec super-users, MERGED with
-    //     `"ANONYMOUS"` when `delegation_token_enabled` (operator's
-    //     PLAINTEXT inter-broker connection identifies as ANONYMOUS and
-    //     the broker's act-as check requires it to be a super-user).
-    //   * `authorization = Some(Opa { ... })` → render `type = "opa"`
-    //     plus the `[authorization.opa]` subtable, with the same
-    //     ANONYMOUS-merge rule for delegation-token clusters.
-    //   * `authorization = None` AND `delegation_token_enabled` → auto-
-    //     inject `type = "simple", super_users = ["ANONYMOUS"]` so the
-    //     delegation-token act-as path keeps working without forcing the user
-    //     to author an explicit `Kafka.spec.authorization`.
-    //   * `authorization = None` AND not delegation-token → omit the
-    //     block entirely; broker falls back to `AllowAllAuthorizer`.
+    // An explicit authorizer always grants the authenticated operator
+    // principal. Delegation tokens without an explicit authorizer get the
+    // same minimal Simple authorizer. Anonymous access is never injected.
     //
     // We intentionally do NOT emit `initial_cache_capacity` from the
     // `OpaAuthorization` CRD field — the broker's `FileOpaConfig` uses
     // `deny_unknown_fields` and only carries `maximum_cache_size`.
     let authz_render = match (authorization, delegation_token_enabled) {
-        (Some(a), dt) => Some(AuthorizationRender::from_spec(a, dt)),
-        (None, true) => Some(AuthorizationRender::auto_injected_simple()),
+        (Some(a), _) => Some(AuthorizationRender::from_spec(a)),
+        (None, true) => Some(AuthorizationRender::operator_simple()),
         (None, false) => None,
     };
     if let Some(r) = &authz_render {
@@ -3644,11 +3621,56 @@ pub fn synthesized_default_listener() -> Listener {
     }
 }
 
+pub(crate) const OPERATOR_LISTENER_NAME: &str = "OPERATOR";
+pub(crate) const OPERATOR_LISTENER_PORT: i32 = 9091;
+
+#[must_use]
+pub(crate) fn operator_listener(existing: &[Listener]) -> Listener {
+    let mut name = OPERATOR_LISTENER_NAME.to_string();
+    while existing.iter().any(|listener| listener.name == name) {
+        name.push('_');
+    }
+    let mut port = OPERATOR_LISTENER_PORT;
+    while port == crate::controller::common::CONTROLLER_PORT
+        || existing.iter().any(|listener| listener.port == port)
+    {
+        port += 1;
+    }
+    Listener {
+        name,
+        port,
+        type_: ListenerType::Internal,
+        tls: true,
+        authentication: Some(ListenerAuthentication::Tls),
+        configuration: None,
+        network_policy_peers: None,
+    }
+}
+
 #[cfg(test)]
 mod toml_rendering_tests {
     use assert2::{assert, check};
 
     use super::*;
+
+    #[test]
+    fn operator_listener_avoids_existing_name_and_port() {
+        let existing = [
+            synthesized_default_listener(),
+            Listener {
+                name: OPERATOR_LISTENER_NAME.into(),
+                port: OPERATOR_LISTENER_PORT,
+                type_: ListenerType::Internal,
+                tls: false,
+                authentication: None,
+                configuration: None,
+                network_policy_peers: None,
+            },
+        ];
+        let operator = operator_listener(&existing);
+        assert!(operator.name == "OPERATOR_");
+        assert!(operator.port == 9094);
+    }
 
     #[test]
     fn renders_minimal_broker_toml_and_round_trips() {
@@ -3879,12 +3901,7 @@ mod toml_rendering_tests {
     }
 
     #[test]
-    fn render_broker_toml_emits_super_users_anonymous_when_delegation_token_set() {
-        // When `delegation_token_enabled` and no explicit
-        // `Kafka.spec.authorization`, the renderer auto-injects an
-        // `[authorization]` block with `type = "simple", super_users =
-        // ["ANONYMOUS"]` — preserving the delegation-token act-as path through
-        // the pluggable-authorizer plumbing.
+    fn render_broker_toml_grants_operator_when_delegation_token_set() {
         let mut addrs = std::collections::BTreeMap::new();
         addrs.insert(
             "PLAIN".into(),
@@ -3903,7 +3920,7 @@ mod toml_rendering_tests {
         for needle in [
             "[authorization]",
             "type = \"simple\"",
-            "super_users = [\"ANONYMOUS\"]",
+            "super_users = [\"User:CN=krabka-operator@internal\"]",
         ] {
             assert!(
                 t.contains(needle),
@@ -3911,15 +3928,12 @@ mod toml_rendering_tests {
                  delegation tokens are enabled, got:\n{t}"
             );
         }
-        // Round-trip: the broker's FileConfig must accept the rendered
-        // block and the `[authorization].super_users` field must carry
-        // ANONYMOUS.
         let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("rendered TOML must parse with broker FileConfig");
         let authz = parsed
             .authorization
             .expect("[authorization] block must round-trip into FileConfig");
-        assert!(authz.super_users == vec!["ANONYMOUS".to_string()]);
+        assert!(authz.super_users == vec!["User:CN=krabka-operator@internal".to_string()]);
     }
 
     #[test]
@@ -3980,7 +3994,10 @@ mod toml_rendering_tests {
         for (needle, want) in [
             ("[authorization]", true),
             ("type = \"simple\"", true),
-            ("super_users = [\"admin\"]", true),
+            (
+                "super_users = [\"admin\", \"User:CN=krabka-operator@internal\"]",
+                true,
+            ),
             ("[authorization.opa]", false),
         ] {
             assert!(
@@ -3992,7 +4009,13 @@ mod toml_rendering_tests {
         let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&t).expect("rendered TOML must parse with broker FileConfig");
         let a = parsed.authorization.expect("[authorization] present");
-        assert!(a.super_users == vec!["admin".to_string()]);
+        assert!(
+            a.super_users
+                == vec![
+                    "admin".to_string(),
+                    "User:CN=krabka-operator@internal".to_string()
+                ]
+        );
         assert!(a.opa.is_none());
     }
 
@@ -4026,7 +4049,10 @@ mod toml_rendering_tests {
         // has no such field. A leaked key would refuse to parse.
         for (needle, want) in [
             ("type = \"opa\"", true),
-            ("super_users = [\"ANONYMOUS\"]", true),
+            (
+                "super_users = [\"ANONYMOUS\", \"User:CN=krabka-operator@internal\"]",
+                true,
+            ),
             ("[authorization.opa]", true),
             ("url = \"http://opa:8181/v1/data/k/a\"", true),
             ("allow_on_error = false", true),
@@ -4066,11 +4092,7 @@ mod toml_rendering_tests {
     }
 
     #[test]
-    fn render_broker_toml_auto_injects_simple_authorization_for_delegation_token() {
-        // Bonus: when `delegation_token_enabled` but the CRD has no
-        // explicit `Kafka.spec.authorization`, the operator auto-injects
-        // the `type = "simple", super_users =
-        // ["ANONYMOUS"]` block so the act-as path keeps working.
+    fn render_broker_toml_injects_operator_authorization_for_delegation_token() {
         let mut addrs = std::collections::BTreeMap::new();
         addrs.insert(
             "PLAIN".into(),
@@ -4089,12 +4111,12 @@ mod toml_rendering_tests {
         for needle in [
             "[authorization]",
             "type = \"simple\"",
-            "super_users = [\"ANONYMOUS\"]",
+            "super_users = [\"User:CN=krabka-operator@internal\"]",
         ] {
             assert!(t.contains(needle), "needle {needle:?}, TOML:\n{t}");
         }
-        // Verify the merge path too: explicit Simple + delegation_token
-        // merges ANONYMOUS into the user's super-users list.
+        // Explicit authorization retains the user's list and appends only the
+        // authenticated operator identity.
         let authz =
             crate::crd::kafka::Authorization::Simple(crate::crd::kafka::SimpleAuthorization {
                 super_users: vec!["User:admin".into()],
@@ -4107,9 +4129,10 @@ mod toml_rendering_tests {
             (&[], ""),
         );
         assert!(
-            t2.contains("super_users = [\"User:admin\", \"ANONYMOUS\"]"),
-            "delegation_token must merge ANONYMOUS into user-authored super_users, got:\n{t2}"
+            t2.contains("super_users = [\"User:admin\", \"User:CN=krabka-operator@internal\"]"),
+            "operator principal must be merged into user-authored super_users, got:\n{t2}"
         );
+        assert!(!t2.contains("\"ANONYMOUS\""));
     }
 
     // ── tiered storage TOML render ───────────────────────────────────

@@ -205,7 +205,7 @@ async fn prepare_topic(
         .get_opt(&cluster)
         .await?
         .as_ref()
-        .and_then(internal_listener_bootstrap);
+        .and_then(operator_listener_bootstrap);
     let Some(bootstrap) = bootstrap else {
         patch_status(
             topic_api,
@@ -226,7 +226,7 @@ async fn prepare_topic(
     };
     if obj.meta().deletion_timestamp.is_some() {
         if !obj.spec.preserve_topic
-            && let Ok(client) = ctx.admin_client_for(&cluster, &bootstrap).await
+            && let Ok(client) = ctx.admin_client_for(namespace, &cluster, &bootstrap).await
         {
             let mut admin = client.lock().await;
             if let Err(error) = admin
@@ -350,7 +350,7 @@ async fn reconcile_inner(
         };
 
     // 6. Connect and fetch current state
-    let admin_handle = match ctx.admin_client_for(&cluster, &bootstrap).await {
+    let admin_handle = match ctx.admin_client_for(&ns, &cluster, &bootstrap).await {
         Ok(h) => h,
         Err(e) => {
             tracing::warn!(error = %e, %cluster, "AdminClient connect failed");
@@ -565,12 +565,32 @@ pub(crate) fn diff_configs(
     ops
 }
 
-/// Returns the bootstrap address from
-/// `Kafka.status.listeners[<inter_broker>]`.
-///
-/// The result is `None` when
-/// `Kafka.status.conditions[Ready].status != "True"`.
 pub(crate) fn internal_listener_bootstrap(kafka: &Kafka) -> Option<String> {
+    let name = crate::controller::listeners::effective_inter_broker_listener_name(
+        &kafka.spec.listeners,
+        kafka.spec.inter_broker_listener_name.as_deref(),
+    );
+    ready_listener_bootstrap(kafka, |listener| {
+        listener.type_ == crate::crd::ListenerType::Internal && listener.name == name
+    })
+}
+
+/// Returns the bootstrap address of the reserved mTLS operator listener.
+pub(crate) fn operator_listener_bootstrap(kafka: &Kafka) -> Option<String> {
+    let existing = if kafka.spec.listeners.is_empty() {
+        vec![crate::controller::listeners::synthesized_default_listener()]
+    } else {
+        kafka.spec.listeners.clone()
+    };
+    let name = crate::controller::listeners::operator_listener(&existing).name;
+    ready_listener_bootstrap(kafka, |listener| listener.name == name)
+}
+
+/// Returns a matching listener only when the Kafka cluster reports Ready.
+fn ready_listener_bootstrap(
+    kafka: &Kafka,
+    predicate: impl Fn(&crate::crd::ListenerStatus) -> bool,
+) -> Option<String> {
     let ready_true = kafka
         .status
         .as_ref()
@@ -579,15 +599,10 @@ pub(crate) fn internal_listener_bootstrap(kafka: &Kafka) -> Option<String> {
     if !ready_true {
         return None;
     }
-    let inter_broker = kafka
-        .spec
-        .inter_broker_listener_name
-        .as_deref()
-        .unwrap_or("PLAIN");
     let listeners = &kafka.status.as_ref()?.listeners;
     listeners
         .iter()
-        .find(|l| l.name == inter_broker)
+        .find(|listener| predicate(listener))
         .map(|l| l.bootstrap_servers.clone())
         .filter(|s| !s.is_empty())
 }
@@ -734,7 +749,7 @@ mod tests {
             replicas: Some(1),
             ready_replicas: Some(1),
             listeners: vec![ListenerStatus {
-                name: "PLAIN".into(),
+                name: crate::controller::listeners::OPERATOR_LISTENER_NAME.into(),
                 type_: ListenerType::Internal,
                 bootstrap_servers: format!(
                     "{name}-broker-headless.{namespace}.svc.cluster.local:{listener_port}"
@@ -834,10 +849,10 @@ mod tests {
     }
 
     #[test]
-    fn internal_listener_bootstrap_returns_listener_when_ready() {
+    fn operator_listener_bootstrap_returns_listener_when_ready() {
         let k = kafka_ready("demo", "default", 9092);
         assert!(
-            internal_listener_bootstrap(&k).as_deref()
+            operator_listener_bootstrap(&k).as_deref()
                 == Some("demo-broker-headless.default.svc.cluster.local:9092")
         );
     }
@@ -848,6 +863,6 @@ mod tests {
         if let Some(s) = k.status.as_mut() {
             s.conditions[0].status = "False".into();
         }
-        assert!(internal_listener_bootstrap(&k).is_none());
+        assert!(operator_listener_bootstrap(&k).is_none());
     }
 }

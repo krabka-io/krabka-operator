@@ -52,7 +52,7 @@ pub(crate) const QUORUM_BOOTSTRAP_NODE_ID_KEY: &str = "quorumBootstrapNodeId";
 pub(crate) const QUORUM_BOOTSTRAP_POOL_KEY: &str = "quorumBootstrapPool";
 pub(crate) const QUORUM_BOOTSTRAP_INITIALIZED_KEY: &str = "quorumBootstrapInitialized";
 pub(crate) const DEFAULT_BROKER_IMAGE: &str = concat!(
-    "ghcr.io/krabka-io/krabka-operator-broker:",
+    "ghcr.io/krabka-io/krabka-broker:",
     env!("CARGO_PKG_VERSION")
 );
 
@@ -375,6 +375,12 @@ pub(crate) fn render_service(owner: &Kafka) -> Result<Service, ReconcileError> {
     let mut selector: BTreeMap<String, String> = BTreeMap::new();
     selector.insert("app.kubernetes.io/name".into(), APP_LABEL.into());
     selector.insert("app.kubernetes.io/instance".into(), name.clone());
+    let base_listeners = if owner.spec.listeners.is_empty() {
+        vec![crate::controller::listeners::synthesized_default_listener()]
+    } else {
+        owner.spec.listeners.clone()
+    };
+    let operator = crate::controller::listeners::operator_listener(&base_listeners);
 
     let svc: Service = serde_json::from_value(json!({
         "metadata": {
@@ -391,6 +397,12 @@ pub(crate) fn render_service(owner: &Kafka) -> Result<Service, ReconcileError> {
             "publishNotReadyAddresses": true,
             "selector": selector,
             "ports": [
+                {
+                    "name": "operator-admin",
+                    "port": operator.port,
+                    "protocol": "TCP",
+                    "targetPort": operator.port,
+                },
                 {
                     "name": "kafka-internal",
                     "port": BROKER_PORT,
@@ -435,21 +447,17 @@ pub(crate) fn render_configmap(
         data.insert("rust.log".to_string(), filter.to_string());
     }
     // `metadata.version` is finalized via the bootstrap-seeded feature
-    // record (`krabka format --release-version`), not the broker config —
+    // record (`krabka-format --release-version`), not the broker config —
     // so it is intentionally not rendered here. An explicit
     // `spec.metadataVersion` pin still rolls the cluster via the config
     // hash (see `combined_config_hash`), which is a separate channel.
     let server_properties = owner.spec.config.clone().unwrap_or_default();
-    // Surface delegation-token enablement to the per-broker
-    // renderer. The `super_users = ["ANONYMOUS"]`
-    // top-level emit is folded into the `[authorization]` block — passing this
-    // flag still drives the auto-injected `[authorization]` shape (or the
-    // ANONYMOUS-merge into a user-authored authorization).
+    // Surface delegation-token enablement to the per-broker renderer. It
+    // drives the minimal authorizer containing the authenticated operator.
     let delegation_token_enabled = owner.spec.delegation_token.is_some();
     // Optional broker authorizer config. `None` ⇒ broker
     // defaults to AllowAll (or, with delegation tokens enabled, gets the
-    // auto-injected `simple + ANONYMOUS` block — see
-    // `render_broker_toml`).
+    // operator-only Simple authorizer — see `render_broker_toml`).
     let authorization = owner.spec.authorization.as_ref();
     // Thread `Kafka.spec.tieredStorage` into each broker's
     // TOML so the broker-wide `[remote_storage]` block (and the matching
@@ -472,9 +480,13 @@ pub(crate) fn render_configmap(
                 .map(|adv| (*node_id, format!("{}:{CONTROLLER_PORT}", adv.host)))
         })
         .collect();
+    // Seed every node through the persisted, lowest-id bootstrap controller.
+    // The broker's bootstrap probe is fail-closed across the supplied list;
+    // including not-yet-listening peers makes a parallel cold start race.
     let controller_bootstrap_servers: Vec<String> = controller_endpoints
-        .iter()
+        .first()
         .map(|(_, endpoint)| endpoint.clone())
+        .into_iter()
         .collect();
     let controller_quorum_voters: Vec<String> = controller_endpoints
         .iter()
@@ -493,8 +505,6 @@ pub(crate) fn render_configmap(
     let controller_server_name = format!("{name}-broker-headless.{ns}.svc.cluster.local");
     for (broker_id, addrs) in addresses_per_broker {
         let roles = node_roles.get(broker_id);
-        let is_controller =
-            roles.is_none_or(|roles| roles.contains(&crate::crd::NodeRole::Controller));
         let is_broker = roles.is_none_or(|roles| roles.contains(&crate::crd::NodeRole::Broker));
         let controller_only_listeners: Vec<crate::crd::Listener>;
         let node_listeners = if is_broker {
@@ -502,12 +512,20 @@ pub(crate) fn render_configmap(
         } else {
             controller_only_listeners = listeners
                 .iter()
-                .filter(|listener| listener.name == inter_broker_listener_name)
+                .filter(|listener| {
+                    listener.name == inter_broker_listener_name
+                        || listener
+                            .name
+                            .starts_with(crate::controller::listeners::OPERATOR_LISTENER_NAME)
+                })
                 .cloned()
                 .collect();
             &controller_only_listeners
         };
         let tls_for_broker = tls_per_broker.and_then(|m| m.get(broker_id));
+        // Controller processes default an omitted voter list to a one-node
+        // self quorum. Render the complete initial set on every node so a
+        // fresh multi-controller cluster forms one quorum rather than three.
         let rendered = crate::controller::listeners::render_broker_toml(
             (
                 *broker_id,
@@ -522,14 +540,7 @@ pub(crate) fn render_configmap(
                 inter_broker_kerberos,
             ),
             tiered_storage,
-            (
-                if is_controller {
-                    &[]
-                } else {
-                    controller_quorum_voters.as_slice()
-                },
-                &controller_server_name,
-            ),
+            (controller_quorum_voters.as_slice(), &controller_server_name),
         );
         let mut toml = String::with_capacity(dynamic_quorum_config.len() + rendered.len());
         toml.push_str(&dynamic_quorum_config);
@@ -1851,6 +1862,11 @@ mod cluster_object_tests {
         assert!(spec.cluster_ip.as_deref() == Some("None"));
 
         let ports = spec.ports.expect("service ports");
+        let operator = ports
+            .iter()
+            .find(|p| p.name.as_deref() == Some("operator-admin"))
+            .expect("operator admin port must be present");
+        check!(operator.port == crate::controller::listeners::OPERATOR_LISTENER_PORT);
         let controller = ports
             .iter()
             .find(|p| p.name.as_deref() == Some("controller"))
@@ -1875,7 +1891,10 @@ mod cluster_object_tests {
 
     #[test]
     fn configmap_wires_controllers_and_broker_observer() {
-        let listeners = vec![internal_listener("PLAIN", 9092)];
+        let listeners = vec![
+            internal_listener("PLAIN", 9092),
+            crate::controller::listeners::operator_listener(&[internal_listener("PLAIN", 9092)]),
+        ];
         // Three brokers, each with its own inter-broker advertised host.
         let mut addresses_per_broker: BTreeMap<i32, BTreeMap<String, AdvertisedAddress>> =
             BTreeMap::new();
@@ -1886,6 +1905,13 @@ mod cluster_object_tests {
                 AdvertisedAddress {
                     host: host.into(),
                     port: 9092,
+                },
+            );
+            per_listener.insert(
+                crate::controller::listeners::OPERATOR_LISTENER_NAME.to_string(),
+                AdvertisedAddress {
+                    host: host.into(),
+                    port: crate::controller::listeners::OPERATOR_LISTENER_PORT,
                 },
             );
             addresses_per_broker.insert(id, per_listener);
@@ -1913,8 +1939,9 @@ mod cluster_object_tests {
         )
         .expect("render_configmap");
         let data = cm.data.expect("configmap data");
+        assert!(data["broker-1.toml"].contains("name = \"OPERATOR\""));
 
-        let expected = "bootstrap_servers = [\"host-a:9093\",\"host-b:9093\"]";
+        let expected = "bootstrap_servers = [\"host-a:9093\"]";
         // The controller TLS server-name is the shared headless-Service FQDN
         // (`<name>-broker-headless.<ns>.svc.cluster.local`), identical across
         // every broker — a SAN on each broker's serving cert.
@@ -1929,15 +1956,9 @@ mod cluster_object_tests {
                 "broker-{id}.toml must carry every bootstrap endpoint, got:\n{toml}"
             );
             assert!(toml.contains("auto_join = true"));
-            if id == 2 {
-                assert!(
-                    toml.contains(
-                        "controller_quorum_voters = [\"0@host-a:9093\", \"1@host-b:9093\"]"
-                    )
-                );
-            } else {
-                assert!(!toml.contains("controller_quorum_voters"));
-            }
+            assert!(
+                toml.contains("controller_quorum_voters = [\"0@host-a:9093\", \"1@host-b:9093\"]")
+            );
             assert!(
                 toml.contains(expected_server_name),
                 "broker-{id}.toml must carry the controller server name, got:\n{toml}"

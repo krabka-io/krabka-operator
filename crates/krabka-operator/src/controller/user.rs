@@ -40,7 +40,7 @@ use crate::{
     context::Context,
     controller::{
         common::{self, FIELD_MANAGER, ReconcileError, condition},
-        topic::internal_listener_bootstrap,
+        topic::operator_listener_bootstrap,
         user_delegation_token::{self, KubeKafkaUserStatusWriter, KubeSecretWriter},
         user_tls,
     },
@@ -117,7 +117,8 @@ async fn handle_user_lifecycle(
     // 4. Finalizer / delete path
     if obj.meta().deletion_timestamp.is_some() {
         // Best-effort cleanup; errors are logged but don't block finalizer removal.
-        if let Ok(client) = ctx.admin_client_for(cluster, bootstrap).await {
+        let namespace = obj.namespace().unwrap_or_else(|| "default".into());
+        if let Ok(client) = ctx.admin_client_for(&namespace, cluster, bootstrap).await {
             let mut admin = client.lock().await;
             // SCRAM-SHA-256 + SCRAM-SHA-512 both reach
             // `alter_user_scram_credentials_*` for the finalizer
@@ -250,7 +251,8 @@ async fn reconcile_access(sync: UserSyncContext<'_>) -> Result<Action, Reconcile
     let mut token_access = token_access;
     // Open admin for ACL + quota reconciliation (steps 8 + 9). Common
     // to both auth arms.
-    let admin_handle = match ctx.admin_client_for(cluster, bootstrap).await {
+    let namespace = obj.namespace().unwrap_or_else(|| "default".into());
+    let admin_handle = match ctx.admin_client_for(&namespace, cluster, bootstrap).await {
         Ok(h) => h,
         Err(e) => {
             tracing::warn!(error = %e, %cluster, "AdminClient connect failed");
@@ -556,6 +558,27 @@ async fn prepare_user(obj: &KafkaUser, ctx: &Context) -> Result<UserPreparation,
             ctx.config.controller_drift_requeue,
         )));
     };
+    if let Err(message) = validate_reserved_identity(&name, &cluster) {
+        patch_status(
+            &user_api,
+            &name,
+            StatusPatch {
+                obj,
+                status: "False",
+                reason: "InvalidSpec",
+                message: &message,
+                credentials: prior_credentials,
+                tls_cert_not_after: prior_tls_not_after,
+                tls_principal: prior_tls_principal,
+                advance_generation: false,
+                quotas_in_sync: prior_quotas_in_sync,
+            },
+        )
+        .await?;
+        return Ok(UserPreparation::Done(common::requeue(
+            ctx.config.controller_invalid_requeue,
+        )));
+    }
     if let Err(message) = validate_spec(&obj.spec) {
         patch_status(
             &user_api,
@@ -579,7 +602,7 @@ async fn prepare_user(obj: &KafkaUser, ctx: &Context) -> Result<UserPreparation,
     }
     let kafka_api: Api<Kafka> = Api::namespaced(ctx.client.clone(), &namespace);
     let kafka = kafka_api.get_opt(&cluster).await?;
-    let bootstrap = kafka.as_ref().and_then(internal_listener_bootstrap);
+    let bootstrap = kafka.as_ref().and_then(operator_listener_bootstrap);
     let (Some(kafka), Some(bootstrap)) = (kafka, bootstrap) else {
         patch_status(
             &user_api,
@@ -699,7 +722,7 @@ async fn reconcile_inner(obj: Arc<KafkaUser>, ctx: Arc<Context>) -> Result<Actio
             // admin connection is opened again below for ACL + quota
             // work; the brief duplication is intentional and keeps
             // each arm self-contained.
-            let admin_handle = match ctx.admin_client_for(&cluster, &bootstrap).await {
+            let admin_handle = match ctx.admin_client_for(&ns, &cluster, &bootstrap).await {
                 Ok(h) => h,
                 Err(e) => {
                     tracing::warn!(error = %e, %cluster, "AdminClient connect failed");
@@ -803,7 +826,7 @@ async fn reconcile_inner(obj: Arc<KafkaUser>, ctx: Arc<Context>) -> Result<Actio
             let user_writer = KubeKafkaUserStatusWriter {
                 api: user_api.clone(),
             };
-            let admin_handle = match ctx.admin_client_for(&cluster, &bootstrap).await {
+            let admin_handle = match ctx.admin_client_for(&ns, &cluster, &bootstrap).await {
                 Ok(h) => h,
                 Err(e) => {
                     tracing::warn!(error = %e, %cluster, "AdminClient connect failed");
@@ -1110,6 +1133,18 @@ fn validate_spec(spec: &crate::crd::KafkaUserSpec) -> Result<(), String> {
                 return Err(format!("acls[{i}].resource.name is empty"));
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_reserved_identity(name: &str, cluster: &str) -> Result<(), String> {
+    if name == "krabka-operator"
+        || name == user_tls::OPERATOR_IDENTITY
+        || name == user_tls::operator_secret_name(cluster)
+    {
+        return Err(format!(
+            "KafkaUser name {name:?} is reserved for the operator"
+        ));
     }
     Ok(())
 }
@@ -1611,6 +1646,13 @@ mod tests {
         };
         let err = validate_spec(&spec).unwrap_err();
         assert!(err.contains("operations is empty"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_reserved_identity_rejects_operator_principal_and_secret_names() {
+        assert!(validate_reserved_identity("krabka-operator", "demo").is_err());
+        assert!(validate_reserved_identity("demo-operator-admin", "demo").is_err());
+        assert!(validate_reserved_identity("alice", "demo").is_ok());
     }
 
     #[test]

@@ -317,6 +317,7 @@ async fn cluster_ca_within_renewal_window_renews_same_key() {
     ]);
     rules.extend(tail_rules(c, ns));
 
+    rules.extend(shared::operator_admin_rules(c, ns));
     let (ctx, state) = build_ctx(ns, rules);
     reconcile(Arc::new(kafka_cr(c, ns, &[])), ctx)
         .await
@@ -435,6 +436,7 @@ async fn force_replace_key_starts_staged_rotation() {
     ]);
     rules.extend(tail_rules(c, ns));
 
+    rules.extend(shared::operator_admin_rules(c, ns));
     let (ctx, state) = build_ctx(ns, rules);
     reconcile(
         Arc::new(kafka_cr(
@@ -580,6 +582,7 @@ async fn force_replace_clients_key_starts_trust_distribution() {
     ]);
     rules.extend(tail_rules(c, ns));
 
+    rules.extend(shared::operator_admin_rules(c, ns));
     let (ctx, state) = build_ctx(ns, rules);
     reconcile(
         Arc::new(kafka_cr(
@@ -738,6 +741,7 @@ async fn clients_key_promotion_reissues_users_before_marking_converged() {
     ]);
     rules.extend(tail_rules(c, ns));
 
+    rules.extend(shared::operator_admin_rules(c, ns));
     let (ctx, state) = build_ctx(ns, rules);
     reconcile(Arc::new(kafka_cr(c, ns, &[])), ctx)
         .await
@@ -908,6 +912,7 @@ async fn clients_ca_prune_removes_old_root_from_user_secrets_before_returning() 
     ]);
     rules.extend(tail_rules(c, ns));
 
+    rules.extend(shared::operator_admin_rules(c, ns));
     let (ctx, state) = build_ctx(ns, rules);
     reconcile(Arc::new(kafka_cr(c, ns, &[])), ctx)
         .await
