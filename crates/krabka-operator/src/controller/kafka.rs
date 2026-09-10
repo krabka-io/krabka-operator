@@ -29,7 +29,7 @@ use k8s_openapi::{
     },
     apimachinery::pkg::apis::meta::v1::ObjectMeta,
 };
-use krabka_units::{Time, secs};
+use krabka_units::secs;
 use kube::{
     Resource, ResourceExt as _,
     api::{Api, ListParams, Patch, PatchParams},
