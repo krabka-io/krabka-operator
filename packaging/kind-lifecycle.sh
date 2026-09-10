@@ -117,7 +117,48 @@ for _ in $(seq 1 120); do
     sleep 5
 done
 ((new_statefulset_generation > old_statefulset_generation))
-kubectl rollout status statefulset/m20-brokers --timeout=10m
+stable_generation=0
+stable_observations=0
+for _ in $(seq 1 120); do
+    IFS=$'\t' read -r generation observed desired replicas ready current updated current_revision update_revision < <(
+        kubectl get statefulset m20-brokers -o json | jq -r '[
+            .metadata.generation,
+            (.status.observedGeneration // 0),
+            .spec.replicas,
+            (.status.replicas // 0),
+            (.status.readyReplicas // 0),
+            (.status.currentReplicas // 0),
+            (.status.updatedReplicas // 0),
+            (.status.currentRevision // "missing"),
+            (.status.updateRevision // "missing")
+        ] | @tsv'
+    )
+    ca_rotation="$(kubectl get kafka m20 -o jsonpath='{.status.conditions[?(@.type=="CaRotation")].status}')"
+    if ((generation > old_statefulset_generation)) \
+        && [[ "${generation}" == "${observed}" \
+            && "${desired}" == "${replicas}" \
+            && "${desired}" == "${ready}" \
+            && "${desired}" == "${current}" \
+            && "${desired}" == "${updated}" \
+            && "${current_revision}" == "${update_revision}" \
+            && "${ca_rotation}" == "False" ]]; then
+        if [[ "${stable_generation}" == "${generation}" ]]; then
+            ((stable_observations += 1))
+        else
+            stable_generation="${generation}"
+            stable_observations=1
+        fi
+        if ((stable_observations >= 12)); then
+            break
+        fi
+    else
+        stable_generation=0
+        stable_observations=0
+    fi
+    sleep 5
+done
+((stable_observations >= 12))
+kubectl wait kafkanodepool/brokers --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=2m
 kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=10m
 kubectl apply -f - <<EOF
 apiVersion: krabka.io/v1alpha1
