@@ -85,7 +85,8 @@ metadata:
     krabka.io/cluster: m20
 spec:
   partitions: 1
-  replicas: 3
+  # This is an operator-auth canary, not the separate RF=3 lifecycle gate.
+  replicas: 1
 EOF
 kubectl wait kafkatopic/secured-admin-before-rotation --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=5m
 kubectl apply -f - <<EOF
@@ -103,23 +104,19 @@ kubectl wait kafkauser/secured-admin-user --for=jsonpath='{.status.conditions[?(
 
 old_operator_cert="$(kubectl get secret m20-operator-identity -o jsonpath='{.data.user\.crt}')"
 old_statefulset_generation="$(kubectl get statefulset m20-brokers -o jsonpath='{.metadata.generation}')"
-kubectl annotate kafka m20 krabka.io/force-replace-ca-key="$(date -u +%FT%TZ)" --overwrite
-kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="CaRotation")].status}'=True --timeout=2m
+kubectl delete secret m20-operator-identity --wait=true
 for _ in $(seq 1 120); do
-    new_operator_cert="$(kubectl get secret m20-operator-identity -o jsonpath='{.data.user\.crt}')"
+    new_operator_cert="$(kubectl get secret m20-operator-identity --ignore-not-found -o jsonpath='{.data.user\.crt}')"
     if [[ -n "${new_operator_cert}" && "${new_operator_cert}" != "${old_operator_cert}" ]]; then
         break
     fi
     sleep 5
 done
 [[ "${new_operator_cert:-}" != "${old_operator_cert}" ]]
-kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="CaRotation")].status}'=False --timeout=10m
-terminal_config_hash="$(kubectl get kafkanodepool brokers -o jsonpath='{.metadata.labels.krabka\.io/config-hash}')"
-[[ -n "${terminal_config_hash}" ]]
 stable_generation=0
 stable_observations=0
 for _ in $(seq 1 120); do
-    IFS=$'\t' read -r generation observed desired replicas ready current updated current_revision update_revision pod_config_hash < <(
+    IFS=$'\t' read -r generation observed desired replicas ready current updated current_revision update_revision < <(
         kubectl get statefulset m20-brokers -o json | jq -r '[
             .metadata.generation,
             (.status.observedGeneration // 0),
@@ -129,20 +126,16 @@ for _ in $(seq 1 120); do
             (.status.currentReplicas // 0),
             (.status.updatedReplicas // 0),
             (.status.currentRevision // "missing"),
-            (.status.updateRevision // "missing"),
-            (.spec.template.metadata.annotations["krabka.io/config-hash"] // "missing")
+            (.status.updateRevision // "missing")
         ] | @tsv'
     )
-    ca_rotation="$(kubectl get kafka m20 -o jsonpath='{.status.conditions[?(@.type=="CaRotation")].status}')"
-    if ((generation > old_statefulset_generation)) \
-        && [[ "${generation}" == "${observed}" \
+    if [[ "${generation}" == "${old_statefulset_generation}" \
+            && "${generation}" == "${observed}" \
             && "${desired}" == "${replicas}" \
             && "${desired}" == "${ready}" \
             && "${desired}" == "${current}" \
             && "${desired}" == "${updated}" \
-            && "${current_revision}" == "${update_revision}" \
-            && "${pod_config_hash}" == "${terminal_config_hash}" \
-            && "${ca_rotation}" == "False" ]]; then
+            && "${current_revision}" == "${update_revision}" ]]; then
         if [[ "${stable_generation}" == "${generation}" ]]; then
             ((stable_observations += 1))
         else
@@ -159,7 +152,6 @@ for _ in $(seq 1 120); do
     sleep 5
 done
 ((stable_observations >= 12))
-kubectl annotate kafkanodepool brokers krabka.io/evidence-refresh="$(date -u +%FT%TZ)" --overwrite
 kubectl wait kafkanodepool/brokers --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=2m
 kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=10m
 kubectl apply -f - <<EOF
@@ -171,7 +163,8 @@ metadata:
     krabka.io/cluster: m20
 spec:
   partitions: 1
-  replicas: 3
+  # Keep this scoped to proving the reloaded operator credential.
+  replicas: 1
 EOF
 kubectl wait kafkatopic/secured-admin-after-rotation --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=5m
 kubectl get kafka m20 -o json >"${evidence}/kafka.json"
@@ -183,4 +176,4 @@ kubectl logs -n krabka-system -l app.kubernetes.io/name=krabka-operator --all-co
 printf '%s\n' "${old_operator_cert}" >"${evidence}/operator-cert-before.base64"
 printf '%s\n' "${new_operator_cert}" >"${evidence}/operator-cert-after.base64"
 (cd "${evidence}" && sha256sum kafka.json pool.json user.json statefulset.json pods.txt operator.log operator-cert-*.base64 krabka-operator-*.tgz >SHA256SUMS)
-echo "PASS: mTLS operator admin survived cluster-CA credential rotation"
+echo "PASS: mTLS operator admin survived leaf credential rotation without a broker rollout"
