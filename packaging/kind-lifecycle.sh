@@ -19,7 +19,10 @@ done
 docker info >/dev/null
 mkdir -p "${evidence}" "${evidence}/crds"
 chmod 0777 "${evidence}/crds"
-helm package "${root}/charts/krabka-operator" --destination "${evidence}"
+workspace_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "${root}/Cargo.toml" | head -n 1)"
+[[ -n "${workspace_version}" ]]
+helm package "${root}/charts/krabka-operator" --destination "${evidence}" \
+    --version "${workspace_version}" --app-version "${workspace_version}"
 (cd "${evidence}" && sha256sum krabka-operator-*.tgz >CHART_SHA256SUMS)
 cleanup() { kind delete cluster --name "${cluster}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
@@ -101,6 +104,7 @@ kubectl wait kafkauser/secured-admin-user --for=jsonpath='{.status.conditions[?(
 old_operator_cert="$(kubectl get secret m20-operator-admin -o jsonpath='{.data.user\.crt}')"
 old_statefulset_generation="$(kubectl get statefulset m20-brokers -o jsonpath='{.metadata.generation}')"
 kubectl annotate kafka m20 krabka.io/force-replace-clients-ca-key="$(date -u +%FT%TZ)" --overwrite
+kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="CaRotation")].status}'=True --timeout=2m
 for _ in $(seq 1 120); do
     new_operator_cert="$(kubectl get secret m20-operator-admin -o jsonpath='{.data.user\.crt}')"
     if [[ -n "${new_operator_cert}" && "${new_operator_cert}" != "${old_operator_cert}" ]]; then
@@ -109,18 +113,13 @@ for _ in $(seq 1 120); do
     sleep 5
 done
 [[ "${new_operator_cert:-}" != "${old_operator_cert}" ]]
-for _ in $(seq 1 120); do
-    new_statefulset_generation="$(kubectl get statefulset m20-brokers -o jsonpath='{.metadata.generation}')"
-    if ((new_statefulset_generation > old_statefulset_generation)); then
-        break
-    fi
-    sleep 5
-done
-((new_statefulset_generation > old_statefulset_generation))
+kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="CaRotation")].status}'=False --timeout=10m
+terminal_config_hash="$(kubectl get kafkanodepool brokers -o jsonpath='{.metadata.labels.krabka\.io/config-hash}')"
+[[ -n "${terminal_config_hash}" ]]
 stable_generation=0
 stable_observations=0
 for _ in $(seq 1 120); do
-    IFS=$'\t' read -r generation observed desired replicas ready current updated current_revision update_revision < <(
+    IFS=$'\t' read -r generation observed desired replicas ready current updated current_revision update_revision pod_config_hash < <(
         kubectl get statefulset m20-brokers -o json | jq -r '[
             .metadata.generation,
             (.status.observedGeneration // 0),
@@ -130,7 +129,8 @@ for _ in $(seq 1 120); do
             (.status.currentReplicas // 0),
             (.status.updatedReplicas // 0),
             (.status.currentRevision // "missing"),
-            (.status.updateRevision // "missing")
+            (.status.updateRevision // "missing"),
+            (.spec.template.metadata.annotations["krabka.io/config-hash"] // "missing")
         ] | @tsv'
     )
     ca_rotation="$(kubectl get kafka m20 -o jsonpath='{.status.conditions[?(@.type=="CaRotation")].status}')"
@@ -141,6 +141,7 @@ for _ in $(seq 1 120); do
             && "${desired}" == "${current}" \
             && "${desired}" == "${updated}" \
             && "${current_revision}" == "${update_revision}" \
+            && "${pod_config_hash}" == "${terminal_config_hash}" \
             && "${ca_rotation}" == "False" ]]; then
         if [[ "${stable_generation}" == "${generation}" ]]; then
             ((stable_observations += 1))

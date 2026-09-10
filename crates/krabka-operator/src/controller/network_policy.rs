@@ -45,7 +45,7 @@ use crate::{
     crd::{Kafka, Listener, NetworkPolicyPeer},
 };
 
-const OPERATOR_LABEL: &str = "krabka-operator";
+const OPERATOR_COMPONENT_LABEL: &str = "operator";
 
 /// Render the `NetworkPolicy`. This is a pure function of the Kafka CR, the
 /// effective listeners, the inter-broker listener port, and the
@@ -72,7 +72,10 @@ pub(crate) fn render_network_policy(
 
     // Operator allow-rule peer (one peer used across all listener rules).
     let mut operator_match: BTreeMap<String, String> = BTreeMap::new();
-    operator_match.insert("app.kubernetes.io/name".into(), OPERATOR_LABEL.into());
+    operator_match.insert(
+        "app.kubernetes.io/component".into(),
+        OPERATOR_COMPONENT_LABEL.into(),
+    );
     let operator_peer = K8sPeer {
         pod_selector: Some(LabelSelector {
             match_labels: Some(operator_match),
@@ -344,9 +347,9 @@ mod tests {
                         p.pod_selector.as_ref().is_some_and(|s| {
                             s.match_labels
                                 .as_ref()
-                                .and_then(|m| m.get("app.kubernetes.io/name"))
+                                .and_then(|m| m.get("app.kubernetes.io/component"))
                                 .map(String::as_str)
-                                == Some(OPERATOR_LABEL)
+                                == Some(OPERATOR_COMPONENT_LABEL)
                         })
                     })
                 })

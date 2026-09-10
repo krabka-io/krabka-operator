@@ -24,7 +24,7 @@ sh_test(
     name = "kind_lifecycle_test",
     size = "enormous",
     srcs = ["packaging/kind-lifecycle.sh"],
-    data = glob([
+    data = ["Cargo.toml"] + glob([
         "charts/krabka-operator/**",
         "packaging/Dockerfile",
     ]),

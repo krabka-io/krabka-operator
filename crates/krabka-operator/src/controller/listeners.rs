@@ -3676,6 +3676,7 @@ pub(crate) fn operator_listener(existing: &[Listener]) -> Listener {
     }
     let mut port = OPERATOR_LISTENER_PORT;
     while port == crate::controller::common::CONTROLLER_PORT
+        || port == crate::controller::common::BROKER_PORT
         || existing.iter().any(|listener| listener.port == port)
     {
         port += 1;
@@ -3714,6 +3715,20 @@ mod toml_rendering_tests {
         let operator = operator_listener(&existing);
         assert!(operator.name == "OPERATOR_");
         assert!(operator.port == 9094);
+    }
+
+    #[test]
+    fn operator_listener_reserves_the_headless_broker_port() {
+        let existing = [Listener {
+            name: "PUBLIC".into(),
+            port: OPERATOR_LISTENER_PORT,
+            type_: ListenerType::Internal,
+            tls: false,
+            authentication: None,
+            configuration: None,
+            network_policy_peers: None,
+        }];
+        assert!(operator_listener(&existing).port == 9094);
     }
 
     #[test]
