@@ -47,7 +47,8 @@ use crate::{
         cluster_ca,
         common::{
             self, FIELD_MANAGER, ReconcileError, apply_dynamic, apply_object, condition,
-            ensure_cluster_id_secret, owner_ref, patch_status, render_service,
+            ensure_cluster_id_secret, owner_ref, patch_status, render_controller_bootstrap_service,
+            render_service,
         },
         kafka_node_pool,
         listeners::{
@@ -2041,6 +2042,13 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
     let svc_api: Api<Service> = Api::namespaced(ctx.client.clone(), &ns);
     let svc = render_service(&obj)?;
     apply_object(&svc_api, &svc_name(&name), &svc).await?;
+    let controller_bootstrap = render_controller_bootstrap_service(&obj)?;
+    apply_object(
+        &svc_api,
+        &format!("{name}-controller-bootstrap"),
+        &controller_bootstrap,
+    )
+    .await?;
 
     // 2. Validate `spec.listeners`. On failure we still apply the
     //    headless Service (done) and ensure the cluster-id Secret + adopt
