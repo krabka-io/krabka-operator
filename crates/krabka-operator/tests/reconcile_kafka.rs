@@ -458,21 +458,21 @@ async fn kafka_applies_service_configmap_secret_no_statefulset() {
         .collect();
 
     // The reconcile makes CA + keystore calls. With 1 pool the sequence is:
-    //   1. PATCH service
-    //   2. GET cluster-id secret (404)  3. POST cluster-id secret (201)
-    //   4-7. GET/PATCH cluster-ca key+cert (new CA generated)
-    //   8-11. GET/PATCH clients-ca key+cert (new CA generated)
-    //   12-13. GET/PATCH operator admin identity
-    //   14. GET kafkanodepools
-    //   15. GET statefulsets
-    //   16. GET pods
-    //   17-18. GET/PATCH broker keystore
-    //   19. PATCH configmap
-    //   20. PATCH pool owner-ref
-    //   21. PATCH kafka status
+    //   1-2. PATCH headless and controller-bootstrap services
+    //   3. GET cluster-id secret (404)  4. POST cluster-id secret (201)
+    //   5-8. GET/PATCH cluster-ca key+cert (new CA generated)
+    //   9-12. GET/PATCH clients-ca key+cert (new CA generated)
+    //   13-14. GET/PATCH operator admin identity
+    //   15. GET kafkanodepools
+    //   16. GET statefulsets
+    //   17. GET pods
+    //   18-19. GET/PATCH broker keystore
+    //   20. PATCH configmap
+    //   21. PATCH pool owner-ref
+    //   22. PATCH kafka status
     assert!(
-        observed.len() == 21,
-        "expected exactly 21 requests (includes CA, operator identity, and keystore calls), \
+        observed.len() == 22,
+        "expected exactly 22 requests (includes services, CA, operator identity, and keystore calls), \
          saw {}: {:?}",
         observed.len(),
         methods_and_uris
@@ -500,12 +500,18 @@ async fn kafka_applies_service_configmap_secret_no_statefulset() {
         ),
         (
             1,
+            Method::PATCH,
+            "/services/demo-controller-bootstrap",
+            "patch the controller bootstrap service",
+        ),
+        (
+            2,
             Method::GET,
             "/secrets/demo-cluster-id",
             "get the cluster-id secret",
         ),
         (
-            2,
+            3,
             Method::POST,
             "/namespaces/y/secrets",
             "create the cluster-id secret",
@@ -1440,8 +1446,8 @@ async fn kafka_mtls_without_tls_blocks_broker_configmap_and_sets_conditions() {
     for r in &observed {
         let uri = r.uri().to_string();
         assert!(
-            !uri.contains("-bootstrap"),
-            "no bootstrap Service should be applied for invalid listeners: {uri}"
+            !uri.contains("-ext-bootstrap"),
+            "no external bootstrap Service should be applied for invalid listeners: {uri}"
         );
     }
 

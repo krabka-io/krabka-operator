@@ -79,7 +79,7 @@ pub fn mock_client(state: &Arc<MockState>, default_ns: &str) -> Client {
         async move {
             let (parts, body) = req.into_parts();
             let bytes = body.collect().await.unwrap().to_bytes();
-            let captured = Request::from_parts(parts.clone(), bytes);
+            let captured = Request::from_parts(parts.clone(), bytes.clone());
             state.observed.lock().unwrap().push(captured);
 
             // FIFO: walk the rule list, take the first match.
@@ -92,13 +92,33 @@ pub fn mock_client(state: &Arc<MockState>, default_ns: &str) -> Client {
                 pos.map(|i| rules.remove(i)).map(|r| r.response)
             };
 
-            let response = response.unwrap_or_else(|| {
-                Response::builder()
-                    .status(404)
-                    .header("content-type", "application/json")
-                    .body(not_found_body("unexpected"))
-                    .expect("404 response builds")
-            });
+            // Every Kafka reconcile now applies the internal controller
+            // bootstrap Service. Accept that common SSA request here so the
+            // feature-specific FIFO fixtures need not duplicate it.
+            let controller_bootstrap_apply = parts.method == Method::PATCH
+                && parts
+                    .uri
+                    .path()
+                    .rsplit('/')
+                    .next()
+                    .is_some_and(|name| name.ends_with("-controller-bootstrap"));
+            let response = response
+                .or_else(|| {
+                    controller_bootstrap_apply.then(|| {
+                        Response::builder()
+                            .status(200)
+                            .header("content-type", "application/json")
+                            .body(bytes.to_vec())
+                            .expect("controller bootstrap response builds")
+                    })
+                })
+                .unwrap_or_else(|| {
+                    Response::builder()
+                        .status(404)
+                        .header("content-type", "application/json")
+                        .body(not_found_body("unexpected"))
+                        .expect("404 response builds")
+                });
 
             let (rp, rb) = response.into_parts();
             Ok::<_, kube::Error>(Response::from_parts(rp, kube::client::Body::from(rb)))
