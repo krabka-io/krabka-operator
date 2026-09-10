@@ -111,6 +111,21 @@ fn empty_statefulset_list_rule() -> MockRule {
     }
 }
 
+fn pdb_apply_rule(name: &str, namespace: &str) -> MockRule {
+    MockRule {
+        method: Method::PATCH,
+        path_substr: format!("/poddisruptionbudgets/{name}"),
+        response: json_response(
+            200,
+            &serde_json::json!({
+                "apiVersion": "policy/v1",
+                "kind": "PodDisruptionBudget",
+                "metadata": { "name": name, "namespace": namespace },
+            }),
+        ),
+    }
+}
+
 fn pod_list_rule(namespace: &str, names: &[&str]) -> MockRule {
     MockRule {
         method: Method::GET,
@@ -258,6 +273,7 @@ fn happy_path_rules(
             path_substr: format!("/statefulsets/{sts_name}"),
             response: json_response(200, &fake_sts_body(&sts_name, namespace, 1, ready_replicas)),
         },
+        pdb_apply_rule(&sts_name, namespace),
         // 4. GET statefulset (post-apply status read).
         MockRule {
             method: Method::GET,
@@ -483,7 +499,7 @@ async fn controller_scale_down_removes_highest_voter_before_pods() {
                 ..
             }
         ] if *directory_id == uuid::Uuid::from_u128(4)
-    ));
+    ), "calls = {calls:?}");
     let observed = state.take_observed();
     assert!(observed.iter().all(|request| {
         !(request.method() == Method::PATCH && request.uri().to_string().contains("/statefulsets/"))
@@ -678,6 +694,7 @@ async fn broker_only_pool_becomes_ready_without_joining_quorum() {
             path_substr: format!("/statefulsets/{sts_name}"),
             response: json_response(200, &fake_sts_body(&sts_name, namespace, 1, Some(1))),
         },
+        pdb_apply_rule(&sts_name, namespace),
         MockRule {
             method: Method::GET,
             path_substr: format!("/statefulsets/{sts_name}"),
@@ -839,6 +856,7 @@ async fn deleting_pool_removes_exact_committed_voter() {
     ctx.insert_admin_client_for_test("demo", admin.clone())
         .await;
     let mut pool = pool_cr(pool_name, ns, Some(parent), 1);
+    pool.spec.roles = vec![NodeRole::Controller];
     pool.metadata.deletion_timestamp = Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
         "2026-08-08T00:00:00Z".parse().unwrap(),
     ));
@@ -1012,6 +1030,7 @@ async fn deleting_last_voter_keeps_finalizer_and_reports_blocked() {
     ctx.insert_admin_client_for_test("demo", Arc::new(tokio::sync::Mutex::new(admin)))
         .await;
     let mut pool = pool_cr(pool_name, ns, Some(parent), 1);
+    pool.spec.roles = vec![NodeRole::Controller];
     pool.metadata.deletion_timestamp = Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
         "2026-08-08T00:00:00Z".parse().unwrap(),
     ));
@@ -1044,6 +1063,7 @@ async fn parent_deletion_releases_pool_finalizer_without_dismantling_quorum() {
     });
     let (ctx, state) = build_ctx(ns, rules);
     let mut pool = pool_cr(pool_name, ns, Some(parent), 1);
+    pool.spec.roles = vec![NodeRole::Controller];
     pool.metadata.deletion_timestamp = Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
         "2026-08-08T00:00:00Z".parse().unwrap(),
     ));
@@ -1245,6 +1265,7 @@ async fn pool_persistent_claim_renders_volume_claim_template() {
             path_substr: format!("/statefulsets/{sts_name}"),
             response: json_response(200, &fake_sts_body(&sts_name, ns, 1, Some(1))),
         },
+        pdb_apply_rule(&sts_name, ns),
         // 4. Post-apply GET (status read).
         MockRule {
             method: Method::GET,
@@ -1435,6 +1456,7 @@ async fn pool_jbod_renders_multiple_volume_claim_templates() {
             path_substr: format!("/statefulsets/{sts_name}"),
             response: json_response(200, &fake_sts_body(&sts_name, ns, 1, Some(1))),
         },
+        pdb_apply_rule(&sts_name, ns),
         // 4. Post-apply GET (status read).
         MockRule {
             method: Method::GET,
@@ -1577,6 +1599,7 @@ async fn statefulset_mounts_broker_config_volume_and_uses_config_file() {
             path_substr: format!("/statefulsets/{sts_name}"),
             response: json_response(200, &fake_sts_body(&sts_name, ns, 1, Some(1))),
         },
+        pdb_apply_rule(&sts_name, ns),
         // 4. Post-apply GET (status read).
         MockRule {
             method: Method::GET,

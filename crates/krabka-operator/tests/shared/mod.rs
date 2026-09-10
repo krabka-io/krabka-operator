@@ -412,6 +412,7 @@ pub fn fake_parent_kafka_body(name: &str, namespace: &str) -> serde_json::Value 
             ]
         },
         "status": {
+            "kafkaVersion": "0.1.1",
             "conditions": [{
                 "type": "KafkaVersionValid",
                 "status": "True",

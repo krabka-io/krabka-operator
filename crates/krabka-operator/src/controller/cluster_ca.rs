@@ -955,6 +955,8 @@ pub(crate) struct BrokerKeystoreStatus {
     pub issued: Vec<i32>,
     pub reused: Vec<i32>,
     pub pruned: Vec<i32>,
+    /// Stable concatenation of the served leaf certificates, ordered by key.
+    pub leaf_material: String,
 }
 
 /// Per-broker cert request.
@@ -1078,6 +1080,14 @@ pub(crate) async fn ensure_broker_keystore(
         }
     });
     let pruned: Vec<i32> = pruned_ids.into_iter().collect();
+    let leaf_material = data.iter().filter(|(key, _)| key.ends_with(".crt")).fold(
+        String::new(),
+        |mut material, (_, value)| {
+            material.push('\x1E');
+            material.push_str(&String::from_utf8_lossy(&value.0));
+            material
+        },
+    );
 
     let mut labels = BTreeMap::new();
     labels.insert(
@@ -1112,6 +1122,7 @@ pub(crate) async fn ensure_broker_keystore(
         issued,
         reused,
         pruned,
+        leaf_material,
     })
 }
 

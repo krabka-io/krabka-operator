@@ -1936,6 +1936,7 @@ async fn network_policy_transition_deletes_on_disable() {
         cluster_ca: None,
         clients_ca: None,
         kafka_version: None,
+        target_metadata_version: None,
         metadata_version: None,
     });
 

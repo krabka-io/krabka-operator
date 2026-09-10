@@ -917,6 +917,13 @@ pub fn config_hash(content: &str) -> String {
     out
 }
 
+/// Mixes the served broker leaf certificates into the reconciled config hash.
+/// A leaf renewal therefore enters the existing availability-gated pool roll.
+#[must_use]
+pub fn rollout_config_hash(base_hash: &str, leaf_material: &str) -> String {
+    config_hash(&format!("{base_hash}\x1E{leaf_material}"))
+}
+
 /// Combined hash over user `spec.config`, the
 /// canonical listener intent, a `metrics_config.is_some()` bit, and
 /// the cluster CA cert PEM.
@@ -933,9 +940,9 @@ pub fn config_hash(content: &str) -> String {
 /// only the `PodMonitor`/`ServiceMonitor` objects, not the broker pod,
 /// and do not need a roll.
 ///
-/// `cluster_ca_cert_pem` — when `Some`, the cluster CA cert PEM is
-/// included as a fourth segment. The caller appends broker leaf certificates,
-/// so either CA rotation or leaf renewal forces an availability-gated roll.
+/// `cluster_ca_cert_pem` — when `Some`, the cluster CA cert PEM is included as
+/// a fourth segment. [`rollout_config_hash`] subsequently mixes in the served
+/// leaf certificates so either CA rotation or leaf renewal forces a roll.
 ///
 /// `metadata_version_pin` — when `Some`, an *explicit*
 /// `spec.metadataVersion` pin is included as a fifth segment, so changing
@@ -1418,11 +1425,7 @@ mod config_hash_tests {
     }
 
     #[test]
-    fn combined_hash_stable_under_broker_keystore_changes() {
-        // The keystore Secret's contents are never inputs to
-        // combined_config_hash (hot-reload handles leaf renewal).
-        // This test guards against a future regression where someone wires
-        // a keystore digest into the hash.
+    fn rollout_hash_changes_with_broker_leaf_material() {
         let spec = crate::crd::KafkaSpec {
             kafka_version: "0.1.1".into(),
             metadata_version: None,
@@ -1442,9 +1445,15 @@ mod config_hash_tests {
             tracing: None,
             broker_tuning: None,
         };
-        let h1 = combined_config_hash(&spec, Some("ca-pem"), None, None);
-        let h2 = combined_config_hash(&spec, Some("ca-pem"), None, None);
-        assert!(h1 == h2);
+        let base = combined_config_hash(&spec, Some("ca-pem"), None, None);
+        let h1 = rollout_config_hash(&base, "leaf-a");
+        let h1_again = rollout_config_hash(&base, "leaf-a");
+        let h2 = rollout_config_hash(&base, "leaf-b");
+        assert!(h1 == h1_again, "unchanged leaf material must be stable");
+        assert!(
+            h1 != h2,
+            "reissued leaf material must change the rollout hash"
+        );
     }
 
     #[test]

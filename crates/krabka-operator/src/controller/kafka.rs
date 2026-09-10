@@ -1169,7 +1169,7 @@ async fn reconcile_cas(input: CaPhaseInput<'_>) -> Result<CaPhaseResult, Reconci
     // During clients-CA key replacement, include that trust bundle in the
     // roll gate before any user certificate switches to the new signing key.
     // Idle clients-CA renewals remain hot-reload-only.
-    let mut ca_trust = if clients_ca_outcome.phase == cluster_ca::CaPhase::Idle {
+    let ca_trust = if clients_ca_outcome.phase == cluster_ca::CaPhase::Idle {
         cluster_ca_outcome.trust_bundle_pem.clone()
     } else {
         format!(
@@ -1177,19 +1177,6 @@ async fn reconcile_cas(input: CaPhaseInput<'_>) -> Result<CaPhaseResult, Reconci
             cluster_ca_outcome.trust_bundle_pem, clients_ca_outcome.trust_bundle_pem
         )
     };
-    if let Some(secret) = input
-        .secret_api
-        .get_opt(&cluster_ca::broker_keystore_name(name))
-        .await?
-        && let Some(data) = secret.data
-    {
-        for (key, value) in data {
-            if key.ends_with(".crt") {
-                ca_trust.push('\x1E');
-                ca_trust.push_str(&String::from_utf8_lossy(&value.0));
-            }
-        }
-    }
     let cfg_hash =
         common::combined_config_hash(&obj.spec, Some(&ca_trust), explicit_pin, logging_filter);
 
@@ -1435,6 +1422,7 @@ struct ListenerTlsArtifacts {
     per_node: BTreeMap<i32, listeners::BrokerTlsRender>,
     clients_ca_path: Option<&'static str>,
     load_balancer_pending: Vec<(i32, String)>,
+    leaf_material: String,
 }
 
 async fn prepare_listener_tls(
@@ -1495,7 +1483,7 @@ async fn prepare_listener_tls(
             extra_sans: extra_sans.get(&node.broker_id).cloned().unwrap_or_default(),
         })
         .collect::<Vec<_>>();
-    cluster_ca::ensure_broker_keystore(
+    let keystore = cluster_ca::ensure_broker_keystore(
         input.secret_api,
         input.obj,
         &requests,
@@ -1513,6 +1501,7 @@ async fn prepare_listener_tls(
         inventory,
         clients_ca_path,
         load_balancer_pending,
+        leaf_material: keystore.leaf_material,
     })
 }
 
@@ -1552,6 +1541,7 @@ async fn reconcile_valid_listener_resources(
     input: ListenerPhaseInput<'_>,
 ) -> Result<ListenerArtifacts, ReconcileError> {
     let tls = prepare_listener_tls(&input).await?;
+    let rollout_hash = common::rollout_config_hash(input.config_hash, &tls.leaf_material);
     let (nodes, pods, bootstrap_services, broker_services) =
         load_external_listener_state(&input, &tls.inventory).await?;
     let resolved = resolve_addresses_per_broker(
@@ -1603,13 +1593,7 @@ async fn reconcile_valid_listener_resources(
             )
         }
     };
-    adopt_pools(
-        input.pool_api,
-        input.obj,
-        input.pools.iter(),
-        input.config_hash,
-    )
-    .await?;
+    adopt_pools(input.pool_api, input.obj, input.pools.iter(), &rollout_hash).await?;
     Ok(ListenerArtifacts {
         status,
         valid_condition: valid,
