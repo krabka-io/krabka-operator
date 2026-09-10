@@ -1,5 +1,7 @@
 """Root package: the krabka Kubernetes operator."""
 
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
 package(default_visibility = ["//visibility:public"])
 
 # Cargo.lock/Cargo.toml are consumed by `crate.from_cargo` (see //MODULE.bazel);
@@ -16,4 +18,19 @@ exports_files([
 alias(
     name = "krabka-operator",
     actual = "//crates/krabka-operator:krabka-operator",
+)
+
+sh_test(
+    name = "kind_lifecycle_test",
+    size = "enormous",
+    srcs = ["packaging/kind-lifecycle.sh"],
+    data = glob([
+        "charts/krabka-operator/**",
+        "packaging/Dockerfile",
+    ]),
+    tags = [
+        "docker",
+        "external",
+        "no-sandbox",
+    ],
 )
