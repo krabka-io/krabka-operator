@@ -19,6 +19,8 @@ done
 docker info >/dev/null
 mkdir -p "${evidence}" "${evidence}/crds"
 chmod 0777 "${evidence}/crds"
+helm package "${root}/charts/krabka-operator" --destination "${evidence}"
+(cd "${evidence}" && sha256sum krabka-operator-*.tgz >CHART_SHA256SUMS)
 cleanup() { kind delete cluster --name "${cluster}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
@@ -114,5 +116,5 @@ kubectl get pods -o wide >"${evidence}/pods.txt"
 kubectl logs -n krabka-system -l app.kubernetes.io/name=krabka-operator --all-containers >"${evidence}/operator.log"
 printf '%s\n' "${old_operator_cert}" >"${evidence}/operator-cert-before.base64"
 printf '%s\n' "${new_operator_cert}" >"${evidence}/operator-cert-after.base64"
-(cd "${evidence}" && sha256sum kafka.json pool.json statefulset.json pods.txt operator.log operator-cert-*.base64 >SHA256SUMS)
+(cd "${evidence}" && sha256sum kafka.json pool.json statefulset.json pods.txt operator.log operator-cert-*.base64 krabka-operator-*.tgz >SHA256SUMS)
 echo "PASS: mTLS operator admin survived clients-CA credential rotation"
