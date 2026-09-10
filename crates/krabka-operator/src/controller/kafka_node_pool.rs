@@ -1387,6 +1387,7 @@ fn separated_process_roles(roles: &[NodeRole]) -> Option<&'static str> {
 /// parent — `kubectl delete knp <pool>` deletes the `StatefulSet`
 /// directly.
 // linear render pipeline: pod template + storage + per-feature wiring
+#[cfg(test)]
 pub(crate) fn render_statefulset(
     parent: &Kafka,
     pool: &KafkaNodePool,
