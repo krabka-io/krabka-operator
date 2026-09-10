@@ -427,7 +427,7 @@ pub(crate) fn render_service(owner: &Kafka) -> Result<Service, ReconcileError> {
 /// [`crate::controller::listeners::render_broker_toml`].
 pub(crate) fn render_configmap(
     owner: &Kafka,
-    listeners: &[crate::crd::Listener],
+    listeners: (&[crate::crd::Listener], Option<&str>),
     nodes: (&AddressesPerNode, &RolesPerNode),
     inter_broker_listener_name: &str,
     tls_per_broker: Option<
@@ -436,6 +436,7 @@ pub(crate) fn render_configmap(
     clients_ca_path: Option<&str>,
     logging_filter: Option<&str>,
 ) -> Result<ConfigMap, ReconcileError> {
+    let (listeners, operator_listener_name) = listeners;
     let (addresses_per_broker, node_roles) = nodes;
     let name = owner.meta().name.clone().unwrap_or_default();
     let labels = common_labels(&name, &owner.spec.kafka_version, None);
@@ -457,7 +458,7 @@ pub(crate) fn render_configmap(
     let delegation_token_enabled = owner.spec.delegation_token.is_some();
     // Optional broker authorizer config. `None` ⇒ broker
     // defaults to AllowAll (or, with delegation tokens enabled, gets the
-    // operator-only Simple authorizer — see `render_broker_toml`).
+    // minimal Simple authorizer — see `render_broker_toml`).
     let authorization = owner.spec.authorization.as_ref();
     // Thread `Kafka.spec.tieredStorage` into each broker's
     // TOML so the broker-wide `[remote_storage]` block (and the matching
@@ -514,9 +515,7 @@ pub(crate) fn render_configmap(
                 .iter()
                 .filter(|listener| {
                     listener.name == inter_broker_listener_name
-                        || listener
-                            .name
-                            .starts_with(crate::controller::listeners::OPERATOR_LISTENER_NAME)
+                        || operator_listener_name == Some(listener.name.as_str())
                 })
                 .cloned()
                 .collect();
@@ -526,7 +525,7 @@ pub(crate) fn render_configmap(
         // Controller processes default an omitted voter list to a one-node
         // self quorum. Render the complete initial set on every node so a
         // fresh multi-controller cluster forms one quorum rather than three.
-        let rendered = crate::controller::listeners::render_broker_toml(
+        let rendered = crate::controller::listeners::render_broker_toml_with_operator(
             (
                 *broker_id,
                 node_listeners,
@@ -541,6 +540,7 @@ pub(crate) fn render_configmap(
             ),
             tiered_storage,
             (controller_quorum_voters.as_slice(), &controller_server_name),
+            operator_listener_name,
         );
         let mut toml = String::with_capacity(dynamic_quorum_config.len() + rendered.len());
         toml.push_str(&dynamic_quorum_config);
@@ -1536,7 +1536,7 @@ mod config_hash_tests {
 
         let cm = render_configmap(
             &k,
-            &listeners,
+            (&listeners, None),
             (&per_broker, &roles),
             "PLAIN",
             None,
@@ -1645,7 +1645,7 @@ mod config_hash_tests {
 
         let cm = render_configmap(
             &k,
-            &listeners,
+            (&listeners, None),
             (&per_broker, &roles),
             "PLAIN",
             None,
@@ -1891,10 +1891,12 @@ mod cluster_object_tests {
 
     #[test]
     fn configmap_wires_controllers_and_broker_observer() {
-        let listeners = vec![
+        let mut listeners = vec![
             internal_listener("PLAIN", 9092),
-            crate::controller::listeners::operator_listener(&[internal_listener("PLAIN", 9092)]),
+            internal_listener("PUBLIC", 9091),
         ];
+        let operator = crate::controller::listeners::operator_listener(&listeners);
+        listeners.push(operator.clone());
         // Three brokers, each with its own inter-broker advertised host.
         let mut addresses_per_broker: BTreeMap<i32, BTreeMap<String, AdvertisedAddress>> =
             BTreeMap::new();
@@ -1930,7 +1932,7 @@ mod cluster_object_tests {
 
         let cm = render_configmap(
             &test_kafka(),
-            &listeners,
+            (&listeners, Some(&operator.name)),
             (&addresses_per_broker, &roles),
             "PLAIN",
             None,
@@ -1940,6 +1942,10 @@ mod cluster_object_tests {
         .expect("render_configmap");
         let data = cm.data.expect("configmap data");
         assert!(data["broker-1.toml"].contains("name = \"OPERATOR\""));
+        assert!(!data["broker-1.toml"].contains("name = \"PUBLIC\""));
+        assert!(
+            data["broker-1.toml"].contains("client_ca_path = \"/etc/krabka/cluster-ca/ca.crt\"")
+        );
 
         let expected = "bootstrap_servers = [\"host-a:9093\"]";
         // The controller TLS server-name is the shared headless-Service FQDN

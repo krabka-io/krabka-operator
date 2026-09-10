@@ -1591,7 +1591,10 @@ async fn reconcile_valid_listener_resources(
         Ok(addresses) => {
             let cm = common::render_configmap(
                 input.obj,
-                input.effective_listeners,
+                (
+                    input.effective_listeners,
+                    Some(input.operator_listener_name),
+                ),
                 (&addresses, &tls.inventory.roles),
                 input.inter_broker_name,
                 Some(&tls.per_node),

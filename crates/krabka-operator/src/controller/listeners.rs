@@ -3280,13 +3280,9 @@ fn render_listener_sections(
     listeners: &[Listener],
     addresses: &std::collections::BTreeMap<String, AdvertisedAddress>,
     clients_ca_path: Option<&str>,
+    operator_listener_name: Option<&str>,
 ) {
     use std::fmt::Write as _;
-    let operator_listener_name = listeners
-        .split_last()
-        .and_then(|(candidate, user_listeners)| {
-            (candidate == &operator_listener(user_listeners)).then_some(candidate.name.as_str())
-        });
     for l in listeners {
         let adv = addresses
             .get(&l.name)
@@ -3407,6 +3403,7 @@ fn render_broker_header(
     out.push('\n');
 }
 
+#[cfg(test)]
 pub fn render_broker_toml(
     listener_config: (
         i32,
@@ -3426,6 +3423,37 @@ pub fn render_broker_toml(
     ),
     tiered_storage: Option<&crate::crd::kafka::TieredStorage>,
     controller: (&[String], &str),
+) -> String {
+    render_broker_toml_with_operator(
+        listener_config,
+        broker_config,
+        security,
+        tiered_storage,
+        controller,
+        None,
+    )
+}
+
+pub(crate) fn render_broker_toml_with_operator(
+    listener_config: (
+        i32,
+        &[Listener],
+        &std::collections::BTreeMap<String, AdvertisedAddress>,
+        &str,
+    ),
+    broker_config: (
+        &std::collections::BTreeMap<String, String>,
+        Option<&BrokerTlsRender>,
+        Option<&str>,
+    ),
+    security: (
+        bool,
+        Option<&crate::crd::kafka::Authorization>,
+        Option<&crate::crd::kafka::InterBrokerKerberos>,
+    ),
+    tiered_storage: Option<&crate::crd::kafka::TieredStorage>,
+    controller: (&[String], &str),
+    operator_listener_name: Option<&str>,
 ) -> String {
     use std::fmt::Write as _;
     let (broker_id, listeners, addresses_per_listener, inter_broker_listener_name) =
@@ -3448,6 +3476,7 @@ pub fn render_broker_toml(
         listeners,
         addresses_per_listener,
         clients_ca_path,
+        operator_listener_name,
     );
 
     if !server_properties.is_empty() {
@@ -5634,7 +5663,7 @@ mod toml_rendering_tests {
                 port: listener.port,
             },
         );
-        let toml = render_broker_toml(
+        let toml = render_broker_toml_with_operator(
             (0, std::slice::from_ref(&listener), &addresses, "INTERNAL"),
             (
                 &BTreeMap::new(),
@@ -5644,6 +5673,7 @@ mod toml_rendering_tests {
             (false, None, None),
             None,
             (&[], ""),
+            Some(&listener.name),
         );
         assert!(toml.contains("client_ca_path = \"/etc/krabka/cluster-ca/ca.crt\""));
         assert!(!toml.contains("client_ca_path = \"/etc/krabka/clients-ca/ca.crt\""));

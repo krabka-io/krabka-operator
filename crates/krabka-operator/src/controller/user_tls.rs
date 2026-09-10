@@ -38,10 +38,21 @@ pub(crate) const DEFAULT_RENEWAL_DAYS: u32 = 30;
 // `@` is forbidden in Kubernetes object names, so no KafkaUser can ever
 // receive this certificate subject.
 pub(crate) const OPERATOR_IDENTITY: &str = "krabka-operator@internal";
+const OPERATOR_IDENTITY_ANNOTATION: &str = "krabka.io/internal-operator-identity";
 
 #[must_use]
 pub(crate) fn operator_secret_name(cluster: &str) -> String {
     format!("{cluster}-operator-identity")
+}
+
+fn is_operator_identity_secret(secret: &Secret) -> bool {
+    secret
+        .metadata
+        .annotations
+        .as_ref()
+        .and_then(|annotations| annotations.get(OPERATOR_IDENTITY_ANNOTATION))
+        .map(String::as_str)
+        == Some("true")
 }
 
 /// Reconciles the operator's mTLS identity against the operator-only cluster CA.
@@ -54,7 +65,16 @@ pub(crate) async fn ensure_operator_cert_secret(
     broker_trust_bundle_pem: &str,
 ) -> Result<UserCertStatus, ReconcileError> {
     let name = operator_secret_name(&kafka.name_any());
-    if let Some(existing) = secret_api.get_opt(&name).await?
+    let existing = secret_api.get_opt(&name).await?;
+    if existing
+        .as_ref()
+        .is_some_and(|secret| !is_operator_identity_secret(secret))
+    {
+        return Err(ReconcileError::Malformed(format!(
+            "Secret {name:?} already exists and is not an operator identity"
+        )));
+    }
+    if let Some(existing) = existing
         && let Some(not_after) = read_user_cert_not_after(&existing)
         && !is_cert_expiring_soon(&not_after, DEFAULT_RENEWAL_DAYS, OffsetDateTime::now_utc())
         && read_pem_key(&existing, "user.crt").is_some_and(|cert| {
@@ -118,6 +138,10 @@ pub(crate) async fn ensure_operator_cert_secret(
             name: Some(name.clone()),
             namespace: kafka.namespace(),
             labels: Some(labels),
+            annotations: Some(BTreeMap::from([(
+                OPERATOR_IDENTITY_ANNOTATION.into(),
+                "true".into(),
+            )])),
             owner_references: Some(vec![owner_ref::<Kafka>(kafka)?]),
             ..Default::default()
         },
@@ -416,6 +440,23 @@ mod tests {
     #[test]
     fn tls_principal_format() {
         assert!(tls_principal("alice") == "User:CN=alice");
+    }
+
+    #[test]
+    fn operator_identity_marker_rejects_unmanaged_secret_collisions() {
+        let unmanaged = Secret::default();
+        assert!(!is_operator_identity_secret(&unmanaged));
+        let managed = Secret {
+            metadata: ObjectMeta {
+                annotations: Some(BTreeMap::from([(
+                    OPERATOR_IDENTITY_ANNOTATION.into(),
+                    "true".into(),
+                )])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(is_operator_identity_secret(&managed));
     }
 
     #[test]
