@@ -489,17 +489,20 @@ async fn controller_scale_down_removes_highest_voter_before_pods() {
     reconcile(Arc::new(pool), Arc::new(ctx)).await.unwrap();
 
     let calls = admin.lock().await.calls();
-    assert!(matches!(
-        calls.as_slice(),
-        [
-            shared::fake_admin::RecordedCall::DescribeMetadataQuorum,
-            shared::fake_admin::RecordedCall::RemoveRaftVoter {
-                node_id: 3,
-                directory_id,
-                ..
-            }
-        ] if *directory_id == uuid::Uuid::from_u128(4)
-    ), "calls = {calls:?}");
+    assert!(
+        matches!(
+            calls.as_slice(),
+            [
+                shared::fake_admin::RecordedCall::DescribeMetadataQuorum,
+                shared::fake_admin::RecordedCall::RemoveRaftVoter {
+                    node_id: 3,
+                    directory_id,
+                    ..
+                }
+            ] if *directory_id == uuid::Uuid::from_u128(4)
+        ),
+        "calls = {calls:?}"
+    );
     let observed = state.take_observed();
     assert!(observed.iter().all(|request| {
         !(request.method() == Method::PATCH && request.uri().to_string().contains("/statefulsets/"))

@@ -1955,7 +1955,6 @@ async fn reconcile_metadata_version(
     resolved: Option<&str>,
     finalized: Option<&str>,
     pools_rolled: bool,
-    timeout: Time,
 ) -> Result<Option<String>, KafkaCondition> {
     let Some(resolved) = resolved else {
         return Ok(None);
@@ -1990,7 +1989,7 @@ async fn reconcile_metadata_version(
         })?;
     let mut admin = admin.lock().await;
     admin
-        .update_metadata_version(target_level, target_level < finalized_level, timeout)
+        .update_metadata_version(target_level, target_level < finalized_level, secs(30))
         .await
         .map_err(|error| {
             condition(
@@ -2080,7 +2079,6 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
         resolved_metadata.as_deref(),
         finalized_metadata,
         pools_rolled,
-        secs(30),
     )
     .await
     {
