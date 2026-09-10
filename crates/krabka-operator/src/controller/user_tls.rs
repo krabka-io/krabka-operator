@@ -80,6 +80,8 @@ pub(crate) async fn ensure_operator_cert_secret(
         && read_pem_key(&existing, "user.crt").is_some_and(|cert| {
             cert_is_signed_by(&cert, &signing_material.cert_pem)
                 && cert_common_name(&cert).as_deref() == Some(OPERATOR_IDENTITY)
+                && read_pem_key(&existing, "user.key")
+                    .is_some_and(|key| cert_matches_private_key(&cert, &key))
         })
     {
         if read_pem_key(&existing, "ca.crt").as_deref() != Some(broker_trust_bundle_pem) {
@@ -355,6 +357,28 @@ fn cert_is_signed_by(cert_pem: &str, ca_cert_pem: &str) -> bool {
     cert.verify_signature(Some(ca.public_key())).is_ok()
 }
 
+fn cert_matches_private_key(cert_pem: &str, key_pem: &str) -> bool {
+    use rustls::pki_types::{PrivateKeyDer, pem::PemObject as _};
+    use x509_parser::pem::parse_x509_pem;
+
+    let Ok(key) = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()) else {
+        return false;
+    };
+    let Ok(signing_key) = rustls::crypto::ring::sign::any_supported_type(&key) else {
+        return false;
+    };
+    let Some(key_spki) = signing_key.public_key() else {
+        return false;
+    };
+    let Ok((_, cert_pem)) = parse_x509_pem(cert_pem.as_bytes()) else {
+        return false;
+    };
+    let Ok(cert) = cert_pem.parse_x509() else {
+        return false;
+    };
+    cert.public_key().raw == key_spki.as_ref()
+}
+
 fn cert_common_name(pem: &str) -> Option<String> {
     use x509_parser::pem::parse_x509_pem;
     let (_, pem) = parse_x509_pem(pem.as_bytes()).ok()?;
@@ -524,6 +548,16 @@ mod tests {
 
         assert!(cert_is_signed_by(&user.cert_pem, &old_ca.cert_pem));
         assert!(!cert_is_signed_by(&user.cert_pem, &new_ca.cert_pem));
+    }
+
+    #[test]
+    fn user_certificate_matches_only_its_private_key() {
+        let ca = ca::generate_clients_ca("ca", 365).expect("CA");
+        let alice = ca::issue_user_cert(&ca.cert_pem, &ca.key_pem, "alice", 365).expect("alice");
+        let bob = ca::issue_user_cert(&ca.cert_pem, &ca.key_pem, "bob", 365).expect("bob");
+        assert!(cert_matches_private_key(&alice.cert_pem, &alice.key_pem));
+        assert!(!cert_matches_private_key(&alice.cert_pem, &bob.key_pem));
+        assert!(!cert_matches_private_key(&alice.cert_pem, "bad key"));
     }
 
     #[test]
