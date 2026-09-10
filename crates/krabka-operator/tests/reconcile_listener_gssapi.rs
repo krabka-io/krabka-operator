@@ -356,6 +356,7 @@ fn pool_reconcile_rules(
             path_substr: format!("/statefulsets/{sts_name}"),
             response: json_response(200, &fake_sts_body(&sts_name, namespace, 1, Some(0))),
         },
+        shared::pdb_apply_rule(&sts_name, namespace),
         MockRule {
             method: Method::GET,
             path_substr: format!("/statefulsets/{sts_name}"),

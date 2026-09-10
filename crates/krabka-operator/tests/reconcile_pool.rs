@@ -427,6 +427,10 @@ async fn controller_scale_down_removes_highest_voter_before_pods() {
     let mut sibling = fake_pool_body(pool_name, namespace, parent);
     sibling["spec"]["roles"] = serde_json::json!(["Controller"]);
     sibling["spec"]["replicas"] = serde_json::json!(2);
+    let mut observed = fake_sts_body(&sts_name, namespace, 4, Some(4));
+    observed["metadata"]["annotations"] = serde_json::json!({
+        "krabka.io/process-roles": "controller",
+    });
     let mut rules = vec![
         MockRule {
             method: Method::GET,
@@ -452,7 +456,7 @@ async fn controller_scale_down_removes_highest_voter_before_pods() {
         MockRule {
             method: Method::GET,
             path_substr: format!("/statefulsets/{sts_name}"),
-            response: json_response(200, &fake_sts_body(&sts_name, namespace, 4, Some(4))),
+            response: json_response(200, &observed),
         },
         MockRule {
             method: Method::PATCH,
@@ -894,6 +898,10 @@ async fn deleting_pool_finishes_observed_downscale_voters_before_pods() {
         (2, uuid::Uuid::from_u128(3)),
         (10, uuid::Uuid::from_u128(11)),
     ];
+    let mut observed = fake_sts_body(&format!("{parent}-{pool_name}"), ns, 1, Some(1));
+    observed["metadata"]["annotations"] = serde_json::json!({
+        "krabka.io/process-roles": "controller",
+    });
     let rules = vec![
         MockRule {
             method: Method::GET,
@@ -903,10 +911,7 @@ async fn deleting_pool_finishes_observed_downscale_voters_before_pods() {
         MockRule {
             method: Method::GET,
             path_substr: format!("/statefulsets/{parent}-{pool_name}"),
-            response: json_response(
-                200,
-                &fake_sts_body(&format!("{parent}-{pool_name}"), ns, 1, Some(1)),
-            ),
+            response: json_response(200, &observed),
         },
         pod_list_rule(
             ns,

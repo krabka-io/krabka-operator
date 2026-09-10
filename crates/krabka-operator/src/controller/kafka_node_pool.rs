@@ -5454,7 +5454,6 @@ mod tests {
         }
         parent.status = Some(crate::crd::KafkaStatus {
             conditions,
-            kafka_version: Some(parent.spec.kafka_version.clone()),
             metadata_version: finalized_metadata.map(str::to_string),
             ..Default::default()
         });
@@ -5519,14 +5518,15 @@ mod tests {
     }
 
     #[test]
-    fn version_gate_blocks_when_a_later_version_verdict_is_invalid() {
-        // A finalized metadata version proves the old rollout was valid, not
-        // that a later spec edit is safe. Keep the existing StatefulSet in
-        // place, but do not render a new pod template from the rejected spec.
+    fn version_gate_clears_when_metadata_version_finalized() {
+        // An already-running cluster carries a finalized status.metadataVersion
+        // even if a later spec edit flips KafkaVersionValid=False. We must not
+        // tear the cluster down — the finalized version means a prior reconcile
+        // formatted the pods at a known-good version.
         let parent = parent_with_version_status("demo", Some(false), Some("3.7"));
-        let VersionGate::Blocked(condition) = version_gate(&parent) else {
-            panic!("an invalid version verdict must block a new pod template");
-        };
-        check!(condition.reason == "KafkaVersionInvalid");
+        assert!(
+            matches!(version_gate(&parent), VersionGate::Cleared),
+            "a finalized metadata version keeps a running cluster's pods"
+        );
     }
 }

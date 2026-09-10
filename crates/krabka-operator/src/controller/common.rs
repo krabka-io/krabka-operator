@@ -208,17 +208,15 @@ pub(crate) enum ParentVersionGate<'a> {
     Waiting,
 }
 
-/// Shared parent-Kafka version gate. Clears only after the parent validates
-/// the desired version. A previously finalized level must not override a new
-/// invalid target.
+/// Shared parent-Kafka version gate. Clears when the parent has either
+/// `KafkaVersionValid=True` or a finalized `status.metadataVersion`.
 pub(crate) fn parent_version_gate(parent: &Kafka) -> ParentVersionGate<'_> {
     let status = parent.status.as_ref();
     let version_cond =
         status.and_then(|s| s.conditions.iter().find(|c| c.type_ == "KafkaVersionValid"));
-    let target_matches = status
-        .and_then(|s| s.kafka_version.as_deref())
-        .is_some_and(|target| target == parent.spec.kafka_version);
-    if target_matches && version_cond.is_some_and(|c| c.status == "True") {
+    let finalized = status.and_then(|s| s.metadata_version.as_deref());
+
+    if finalized.is_some() || version_cond.is_some_and(|c| c.status == "True") {
         return ParentVersionGate::Cleared;
     }
 

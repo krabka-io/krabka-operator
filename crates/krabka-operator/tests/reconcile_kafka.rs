@@ -42,8 +42,9 @@ mod shared;
 use shared::{
     MockRule, MockState,
     fake_admin::{FakeAdminClient, RecordedCall},
-    fake_configmap_body, fake_kafka_body, fake_pool_body, fake_pool_list_body, fake_pool_list_item,
-    fake_secret_body, fake_service_body, fixture_ctx, json_response, mock_client, not_found_body,
+    fake_configmap_body, fake_converged_sts_body, fake_kafka_body, fake_pool_body,
+    fake_pool_list_body, fake_pool_list_item, fake_secret_body, fake_service_body, fixture_ctx,
+    json_response, mock_client, not_found_body,
 };
 
 fn kafka_cr(name: &str, namespace: &str) -> Kafka {
@@ -389,6 +390,35 @@ fn happy_path_rules(
         path_substr: format!("/kafkas/{name}/status"),
         response: json_response(200, &fake_kafka_body(name, namespace)),
     });
+    rules
+}
+
+fn rolled_version_rules(name: &str, namespace: &str, version: &str) -> Vec<MockRule> {
+    let mut pool = fake_pool_list_item("brokers", namespace, name, 1, 1);
+    pool["metadata"]["labels"]["krabka.io/config-hash"] = json!("rolled");
+    let mut statefulset = fake_converged_sts_body(
+        &format!("{name}-brokers"),
+        namespace,
+        name,
+        "brokers",
+        1,
+        "rolled",
+    );
+    statefulset["metadata"]["labels"]["app.kubernetes.io/version"] = json!(version);
+    let mut rules = happy_path_rules(name, namespace, &[pool]);
+    let rule = rules
+        .iter_mut()
+        .find(|rule| rule.path_substr.contains("/statefulsets"))
+        .expect("StatefulSet list rule");
+    rule.response = json_response(
+        200,
+        &json!({
+            "apiVersion": "apps/v1",
+            "kind": "StatefulSetList",
+            "metadata": { "resourceVersion": "1" },
+            "items": [statefulset],
+        }),
+    );
     rules
 }
 
@@ -1102,8 +1132,7 @@ async fn invalid_broker_tuning_sets_condition_and_skips_configmap() {
 /// it into broker config. See `render_configmap`.
 #[tokio::test]
 async fn kafka_status_finalizes_metadata_version() {
-    let items = vec![fake_pool_list_item("brokers", "y", "demo", 1, 1)];
-    let (ctx, state) = build_ctx("y", happy_path_rules("demo", "y", &items));
+    let (ctx, state) = build_ctx("y", rolled_version_rules("demo", "y", "3.7.0"));
     let kafka = kafka_cr_with_versions("demo", "y", "3.7.0", None);
 
     reconcile(Arc::new(kafka), ctx).await.unwrap();
@@ -1179,8 +1208,7 @@ async fn kafka_metadata_version_too_high_blocks() {
 
 #[tokio::test]
 async fn kafka_metadata_version_downgrade_uses_safe_update_before_advancing_status() {
-    let items = vec![fake_pool_list_item("brokers", "y", "demo", 1, 1)];
-    let (ctx, state) = build_ctx("y", happy_path_rules("demo", "y", &items));
+    let (ctx, state) = build_ctx("y", rolled_version_rules("demo", "y", "4.0.0"));
     let fake = Arc::new(tokio::sync::Mutex::new(FakeAdminClient::new()));
     let fake_for_assert = fake.clone();
     ctx.insert_admin_client_for_test("demo", fake).await;
@@ -1223,8 +1251,7 @@ async fn kafka_metadata_version_downgrade_uses_safe_update_before_advancing_stat
 
 #[tokio::test]
 async fn kafka_metadata_version_downgrade_rejection_holds_finalized_status() {
-    let items = vec![fake_pool_list_item("brokers", "y", "demo", 1, 1)];
-    let (ctx, state) = build_ctx("y", happy_path_rules("demo", "y", &items));
+    let (ctx, state) = build_ctx("y", rolled_version_rules("demo", "y", "4.0.0"));
     let fake = Arc::new(tokio::sync::Mutex::new(FakeAdminClient::new()));
     fake.lock()
         .await

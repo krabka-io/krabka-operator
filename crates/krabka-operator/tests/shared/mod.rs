@@ -252,6 +252,21 @@ pub fn fake_service_body(name: &str, namespace: &str) -> serde_json::Value {
     })
 }
 
+pub fn pdb_apply_rule(name: &str, namespace: &str) -> MockRule {
+    MockRule {
+        method: Method::PATCH,
+        path_substr: format!("/poddisruptionbudgets/{name}"),
+        response: json_response(
+            200,
+            &serde_json::json!({
+                "apiVersion": "policy/v1",
+                "kind": "PodDisruptionBudget",
+                "metadata": { "name": name, "namespace": namespace },
+            }),
+        ),
+    }
+}
+
 pub fn fake_configmap_body(name: &str, namespace: &str) -> serde_json::Value {
     serde_json::json!({
         "apiVersion": "v1",
@@ -986,6 +1001,7 @@ pub fn pool_reconcile_rules(
             path_substr: format!("/statefulsets/{sts_name}"),
             response: json_response(200, &fake_sts_body(&sts_name, namespace, 1, Some(0))),
         },
+        pdb_apply_rule(&sts_name, namespace),
         MockRule {
             method: Method::GET,
             path_substr: format!("/statefulsets/{sts_name}"),
