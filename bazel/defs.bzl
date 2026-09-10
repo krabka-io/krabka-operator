@@ -15,7 +15,6 @@ load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@rules_rs_mutants//mutants:cargo_mutants_test.bzl", "cargo_mutants_test")
 load("@rules_rust//rust:defs.bzl", "rust_doc", "rust_doc_test")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools/lint:linters.bzl", "clippy_test")
 
 # `[workspace.lints.rust] unsafe_code = "forbid"`. rules_rs 0.0.106 does not
@@ -187,7 +186,6 @@ def crate_tests(
         data = None,
         compile_data = None,
         cpu_heavy = [],
-        docker = {},
         env = {},
         extra_srcs = {},
         rustc_env = {},
@@ -302,62 +300,4 @@ def crate_tests(
             # same package in both tables. `all_crate_deps` merges the two specs
             # through a set, so asking for both at once dedupes them.
             deps = all_crate_deps(normal = True, normal_dev = True) + [":" + lib],
-        )
-
-        if stem not in docker:
-            continue
-
-        # The same sources built again, this time to be driven by a wrapper that
-        # loads Bazel's digest-pinned Kafka images before handing over. Built as
-        # a non-test target so `bazel test //...` does not try to run it bare.
-        rust_test(
-            name = stem + "_docker_bin",
-            srcs = [src] + helpers + extra_srcs.get(stem, []),
-            crate_root = src,
-            aliases = _aliases(["deps", "dev_deps"]),
-            compile_data = compile_data or [],
-            crate_features = _features(),
-            data = data or [],
-            edition = edition(),
-            env = env,
-            rustc_env = rustc_env,
-            rustc_flags = WORKSPACE_RUSTC_FLAGS,
-            tags = ["manual"],
-            use_libtest_harness = stem not in no_harness,
-            deps = all_crate_deps(normal = True, normal_dev = True) + [":" + lib],
-        )
-
-        image_tars = ["//bazel/images:%s_tar" % image for image in docker[stem]]
-
-        # The Docker daemon is the one thing here Bazel cannot own, so it is the
-        # one thing left undeclared: `no-sandbox` for the socket, and `external`
-        # so a pass is never cached against inputs that do not describe the
-        # daemon's state. Everything else -- the image bytes above all -- is a
-        # declared, digest-pinned input rather than a mid-test network fetch.
-        sh_test(
-            name = stem + "_docker_test",
-            size = "enormous",
-            # These form real Kafka clusters and assert that a leader is elected
-            # and an ISR populated inside a timeout. On a loaded runner that can
-            # miss without the code being wrong -- `jvm_kip320_divergence` failed
-            # one job and passed another on the same commit, with `Leader: none`
-            # and an empty ISR. A retry separates that from a real break, and
-            # Bazel reports FLAKY rather than PASSED, so it stays visible.
-            flaky = True,
-            srcs = ["//bazel:docker_test.sh"],
-            args = ["$(rootpath :%s_docker_bin)" % stem],
-            # The caller's `data` comes along because its `env` may name those
-            # labels in a `$(rootpath)`, which only resolves for a declared
-            # prerequisite of this rule.
-            data = [":%s_docker_bin" % stem] + image_tars + (data or []) + [
-            ],
-            env = dict(env, KRABKA_IMAGE_TARS = ":".join([
-                "$(rootpath %s)" % tar
-                for tar in image_tars
-            ])),
-            tags = [
-                "docker",
-                "external",
-                "no-sandbox",
-            ],
         )

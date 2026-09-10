@@ -19,6 +19,31 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
+  kind-lifecycle:
+    name: kind lifecycle
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
+        with:
+          aspect-api-token: ${{ secrets.ASPECT_API_TOKEN }}
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}-kind
+          repository-cache: true
+      - uses: helm/kind-action@v1.15.0
+        with:
+          install_only: true
+      - run: docker build --tag krabka-operator:e2e --file packaging/Dockerfile .
+      - run: >-
+          bazel test --config=docker //:kind_lifecycle_test --test_env=EVIDENCE_DIR=${RUNNER_TEMP}/operator-evidence --test_output=streamed
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: operator-kind-evidence
+          path: ${{ runner.temp }}/operator-evidence
+          if-no-files-found: warn
   # Build, test, lint and format. The Aspect CLI narrows each of these to what
   # the change actually touched; `bazel build|test //...` is the equivalent for
   # anyone without the CLI, and is what the nightly job runs.

@@ -33,7 +33,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - run
-            - --default-broker-image={{ .Values.brokerImage.repository }}:{{ .Values.brokerImage.tag | default .Chart.AppVersion }}
+            - --default-broker-image={{ .Values.brokerImage.repository }}{{ if .Values.brokerImage.digest }}@{{ .Values.brokerImage.digest }}{{ else }}:{{ .Values.brokerImage.tag | default .Chart.AppVersion }}{{ end }}
             - --default-gateway-image={{ .Values.gatewayImage.repository }}:{{ .Values.gatewayImage.tag | default .Chart.AppVersion }}
             - --default-connector-image={{ .Values.connectorImage.repository }}:{{ .Values.connectorImage.tag | default .Chart.AppVersion }}
             - --default-gres-image={{ .Values.gresImage.repository }}:{{ .Values.gresImage.tag | default .Chart.AppVersion }}
