@@ -53,10 +53,10 @@ fn ready_kafka_body(name: &str, namespace: &str) -> serde_json::Value {
                 "lastTransitionTime": "2026-05-17T00:00:00Z",
             }],
             "listeners": [{
-                "name": "PLAIN",
+                "name": "OPERATOR",
                 "type": "internal",
                 "bootstrapServers": format!(
-                    "{name}-broker-headless.{namespace}.svc.cluster.local:9092"
+                    "{name}-broker-headless.{namespace}.svc.cluster.local:9091"
                 ),
                 "addresses": [],
             }],

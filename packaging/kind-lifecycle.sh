@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-broker_image="${BROKER_IMAGE:-ghcr.io/krabka-io/krabka-broker@sha256:886fbe511a0cadacec0c352fe10b295063b3807c0df133d2fce4ea804f4fffcd}"
+broker_image="${BROKER_IMAGE:-ghcr.io/krabka-io/krabka-broker@sha256:15851611a7d5df6e20d3f9bd85b3821ca2dd52d5ca6f4042f5a4cfe0a3a1ab89}"
 operator_image="${OPERATOR_IMAGE:-krabka-operator:e2e}"
 cluster="${KIND_CLUSTER:-krabka-operator-e2e}"
 evidence="${EVIDENCE_DIR:-${TEST_TMPDIR:-/tmp}/krabka-operator-evidence}"
-root="${BUILD_WORKSPACE_DIRECTORY:-$(cd "$(dirname "$0")/.." && pwd)}"
+if [[ -n "${BUILD_WORKSPACE_DIRECTORY:-}" ]]; then
+    root="${BUILD_WORKSPACE_DIRECTORY}"
+elif [[ -n "${RUNFILES_DIR:-}" ]]; then
+    root="${RUNFILES_DIR}/${TEST_WORKSPACE:-_main}"
+else
+    root="$(cd "$(dirname "$0")/.." && pwd)"
+fi
 
 for tool in docker kind kubectl helm jq sha256sum; do
     command -v "${tool}" >/dev/null || { echo "missing ${tool}" >&2; exit 1; }
@@ -13,6 +19,11 @@ done
 docker info >/dev/null
 mkdir -p "${evidence}" "${evidence}/crds"
 chmod 0777 "${evidence}/crds"
+workspace_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "${root}/Cargo.toml" | head -n 1)"
+[[ -n "${workspace_version}" ]]
+helm package "${root}/charts/krabka-operator" --destination "${evidence}" \
+    --version "${workspace_version}" --app-version "${workspace_version}"
+(cd "${evidence}" && sha256sum krabka-operator-*.tgz >CHART_SHA256SUMS)
 cleanup() { kind delete cluster --name "${cluster}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
@@ -58,10 +69,111 @@ kubectl wait --for=create statefulset/m20-brokers --timeout=2m
 kubectl rollout status statefulset/m20-brokers --timeout=10m
 kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=10m
 kubectl wait kafkanodepool/brokers --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=10m
+kubectl get secret m20-operator-identity >/dev/null
+broker_config="$(kubectl get configmap m20-broker-config -o jsonpath='{.data.broker-0\.toml}')"
+grep -q 'name = "OPERATOR"' <<<"${broker_config}"
+grep -q 'protocol = "Ssl"' <<<"${broker_config}"
+grep -q 'client_auth = "Required"' <<<"${broker_config}"
+! grep -q '"ANONYMOUS"' <<<"${broker_config}"
+
+kubectl apply -f - <<EOF
+apiVersion: krabka.io/v1alpha1
+kind: KafkaTopic
+metadata:
+  name: secured-admin-before-rotation
+  labels:
+    krabka.io/cluster: m20
+spec:
+  partitions: 1
+  # This is an operator-auth canary, not the separate RF=3 lifecycle gate.
+  replicas: 1
+EOF
+kubectl wait kafkatopic/secured-admin-before-rotation --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=5m
+kubectl apply -f - <<EOF
+apiVersion: krabka.io/v1alpha1
+kind: KafkaUser
+metadata:
+  name: secured-admin-user
+  labels:
+    krabka.io/cluster: m20
+spec:
+  authentication:
+    type: scram-sha-512
+EOF
+kubectl wait kafkauser/secured-admin-user --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=5m
+
+old_operator_cert="$(kubectl get secret m20-operator-identity -o jsonpath='{.data.user\.crt}')"
+old_statefulset_generation="$(kubectl get statefulset m20-brokers -o jsonpath='{.metadata.generation}')"
+kubectl delete secret m20-operator-identity --wait=true
+for _ in $(seq 1 120); do
+    new_operator_cert="$(kubectl get secret m20-operator-identity --ignore-not-found -o jsonpath='{.data.user\.crt}')"
+    if [[ -n "${new_operator_cert}" && "${new_operator_cert}" != "${old_operator_cert}" ]]; then
+        break
+    fi
+    sleep 5
+done
+[[ "${new_operator_cert:-}" != "${old_operator_cert}" ]]
+stable_generation=0
+stable_observations=0
+for _ in $(seq 1 120); do
+    IFS=$'\t' read -r generation observed desired replicas ready current updated current_revision update_revision < <(
+        kubectl get statefulset m20-brokers -o json | jq -r '[
+            .metadata.generation,
+            (.status.observedGeneration // 0),
+            .spec.replicas,
+            (.status.replicas // 0),
+            (.status.readyReplicas // 0),
+            (.status.currentReplicas // 0),
+            (.status.updatedReplicas // 0),
+            (.status.currentRevision // "missing"),
+            (.status.updateRevision // "missing")
+        ] | @tsv'
+    )
+    if [[ "${generation}" == "${old_statefulset_generation}" \
+            && "${generation}" == "${observed}" \
+            && "${desired}" == "${replicas}" \
+            && "${desired}" == "${ready}" \
+            && "${desired}" == "${current}" \
+            && "${desired}" == "${updated}" \
+            && "${current_revision}" == "${update_revision}" ]]; then
+        if [[ "${stable_generation}" == "${generation}" ]]; then
+            ((stable_observations += 1))
+        else
+            stable_generation="${generation}"
+            stable_observations=1
+        fi
+        if ((stable_observations >= 12)); then
+            break
+        fi
+    else
+        stable_generation=0
+        stable_observations=0
+    fi
+    sleep 5
+done
+((stable_observations >= 12))
+kubectl wait kafkanodepool/brokers --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=2m
+kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=10m
+kubectl apply -f - <<EOF
+apiVersion: krabka.io/v1alpha1
+kind: KafkaTopic
+metadata:
+  name: secured-admin-after-rotation
+  labels:
+    krabka.io/cluster: m20
+spec:
+  partitions: 1
+  # Keep this scoped to proving the reloaded operator credential.
+  replicas: 1
+EOF
+kubectl wait kafkatopic/secured-admin-after-rotation --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=5m
 kubectl get kafka m20 -o json >"${evidence}/kafka.json"
 kubectl get kafkanodepool brokers -o json >"${evidence}/pool.json"
+kubectl get kafkauser secured-admin-user -o json >"${evidence}/user.json"
 kubectl get statefulset m20-brokers -o json >"${evidence}/statefulset.json"
 kubectl get pods -o wide >"${evidence}/pods.txt"
-kubectl logs -n krabka-system deployment/krabka-operator >"${evidence}/operator.log"
-(cd "${evidence}" && sha256sum kafka.json pool.json statefulset.json pods.txt operator.log >SHA256SUMS)
-echo "PASS: operator-backed Kind lifecycle reconciled three pinned-image brokers"
+kubectl logs -n krabka-system -l app.kubernetes.io/name=krabka-operator --all-containers >"${evidence}/operator.log"
+printf '%s\n' "${old_operator_cert}" >"${evidence}/operator-cert-before.base64"
+printf '%s\n' "${new_operator_cert}" >"${evidence}/operator-cert-after.base64"
+(cd "${evidence}" && sha256sum kafka.json pool.json user.json statefulset.json pods.txt operator.log operator-cert-*.base64 krabka-operator-*.tgz >SHA256SUMS)
+echo "PASS: mTLS operator admin survived leaf credential rotation without a broker rollout"

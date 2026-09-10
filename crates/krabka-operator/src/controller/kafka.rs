@@ -47,15 +47,16 @@ use crate::{
         cluster_ca,
         common::{
             self, FIELD_MANAGER, ReconcileError, apply_dynamic, apply_object, condition,
-            ensure_cluster_id_secret, owner_ref, patch_status, render_service,
+            ensure_cluster_id_secret, owner_ref, patch_status, render_controller_bootstrap_service,
+            render_service,
         },
         kafka_node_pool,
         listeners::{
             self, AdvertisedAddress, INGRESS_PORT, compute_advertised,
-            effective_inter_broker_listener_name, ingress_bootstrap_host, render_bootstrap_ingress,
-            render_bootstrap_route, render_bootstrap_service, render_broker_ingress,
-            render_broker_route, render_broker_service, synthesized_default_listener,
-            validate_listeners,
+            effective_inter_broker_listener_name, ingress_bootstrap_host, operator_listener,
+            render_bootstrap_ingress, render_bootstrap_route, render_bootstrap_service,
+            render_broker_ingress, render_broker_route, render_broker_service,
+            synthesized_default_listener, validate_listeners,
         },
         logging, network_policy, user_tls,
     },
@@ -833,6 +834,7 @@ async fn read_external_state(
 fn resolve_addresses_per_broker(
     effective_listeners: &[Listener],
     inter_broker_listener_name: &str,
+    operator_listener_name: &str,
     brokers: &[NodeInfo],
     pods_by_name: &HashMap<String, Pod>,
     nodes: &HashMap<String, Node>,
@@ -841,10 +843,11 @@ fn resolve_addresses_per_broker(
     let mut out: BTreeMap<i32, BTreeMap<String, AdvertisedAddress>> = BTreeMap::new();
     for b in brokers {
         let mut listener_map: BTreeMap<String, AdvertisedAddress> = BTreeMap::new();
-        for l in effective_listeners
-            .iter()
-            .filter(|listener| b.is_broker() || listener.name == inter_broker_listener_name)
-        {
+        for l in effective_listeners.iter().filter(|listener| {
+            b.is_broker()
+                || listener.name == inter_broker_listener_name
+                || listener.name == operator_listener_name
+        }) {
             let pod_node = pods_by_name
                 .get(&b.pod_name)
                 .and_then(|p| p.spec.as_ref())
@@ -925,6 +928,15 @@ struct CaPhaseInput<'a> {
     logging_filter: Option<&'a str>,
 }
 
+fn exclude_reserved_operator_user(users: &mut Vec<KafkaUser>, cluster: &str) {
+    let reserved = user_tls::operator_secret_name(cluster);
+    let legacy = format!("{cluster}-operator-admin");
+    users.retain(|user| {
+        let name = user.name_any();
+        name != reserved && name != legacy && !name.ends_with("-operator-identity")
+    });
+}
+
 struct CaArtifacts {
     cluster: cluster_ca::CaReconcileOutcome,
     clients: cluster_ca::CaReconcileOutcome,
@@ -945,6 +957,7 @@ struct ListenerPhaseInput<'a> {
     namespace: &'a str,
     name: &'a str,
     effective_listeners: &'a [Listener],
+    operator_listener_name: &'a str,
     inter_broker_name: &'a str,
     logging_filter: Option<&'a str>,
     service_api: &'a Api<Service>,
@@ -1092,15 +1105,24 @@ async fn reconcile_cas(input: CaPhaseInput<'_>) -> Result<CaPhaseResult, Reconci
     // managed TLS-user Secrets. A prune may patch the CA Secret successfully
     // and then fail on one user; the next pass is still required to repair it
     // even though the one-pass `pruned_old_trust` signal is gone.
+    user_tls::ensure_operator_cert_secret(
+        secret_api,
+        obj,
+        &cluster_ca_outcome.signing_material,
+        &cluster_ca_outcome.trust_bundle_pem,
+    )
+    .await?;
+
     let sync_tls_user_secrets = clients_ca_outcome.leaf_transition.requires_reissue()
         || clients_ca_outcome.leaf_transition.pruned_old_trust()
         || clients_ca_outcome.cert_generation.0 > 0
         || clients_ca_outcome.key_generation.0 > 0;
     if sync_tls_user_secrets {
         let user_api: Api<KafkaUser> = Api::namespaced(ctx.client.clone(), ns);
-        let users = user_api
+        let mut users = user_api
             .list(&ListParams::default().labels(&format!("krabka.io/cluster={name}")))
             .await?;
+        exclude_reserved_operator_user(&mut users.items, name);
         let issued = user_tls::reissue_tls_user_cert_secrets(
             secret_api,
             &users.items,
@@ -1170,10 +1192,13 @@ async fn reconcile_cas(input: CaPhaseInput<'_>) -> Result<CaPhaseResult, Reconci
     // roll gate before any user certificate switches to the new signing key.
     // Idle clients-CA renewals remain hot-reload-only.
     let ca_trust = if clients_ca_outcome.phase == cluster_ca::CaPhase::Idle {
-        cluster_ca_outcome.trust_bundle_pem.clone()
+        format!(
+            "{}\x1Eoperator-admin-mtls-v1",
+            cluster_ca_outcome.trust_bundle_pem
+        )
     } else {
         format!(
-            "{}\x1E{}",
+            "{}\x1E{}\x1Eoperator-admin-mtls-v1",
             cluster_ca_outcome.trust_bundle_pem, clients_ca_outcome.trust_bundle_pem
         )
     };
@@ -1547,6 +1572,7 @@ async fn reconcile_valid_listener_resources(
     let resolved = resolve_addresses_per_broker(
         input.effective_listeners,
         input.inter_broker_name,
+        input.operator_listener_name,
         &tls.inventory.all,
         &pods,
         &nodes,
@@ -1566,7 +1592,10 @@ async fn reconcile_valid_listener_resources(
         Ok(addresses) => {
             let cm = common::render_configmap(
                 input.obj,
-                input.effective_listeners,
+                (
+                    input.effective_listeners,
+                    Some(input.operator_listener_name),
+                ),
                 (&addresses, &tls.inventory.roles),
                 input.inter_broker_name,
                 Some(&tls.per_node),
@@ -1977,7 +2006,7 @@ async fn reconcile_metadata_version(
 
     let bootstrap = format!("{name}-broker-headless.{namespace}.svc.cluster.local:{port}");
     let admin = ctx
-        .admin_client_for(name, &bootstrap)
+        .admin_client_for(namespace, name, &bootstrap)
         .await
         .map_err(|error| {
             condition(
@@ -2013,6 +2042,13 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
     let svc_api: Api<Service> = Api::namespaced(ctx.client.clone(), &ns);
     let svc = render_service(&obj)?;
     apply_object(&svc_api, &svc_name(&name), &svc).await?;
+    let controller_bootstrap = render_controller_bootstrap_service(&obj)?;
+    apply_object(
+        &svc_api,
+        &format!("{name}-controller-bootstrap"),
+        &controller_bootstrap,
+    )
+    .await?;
 
     // 2. Validate `spec.listeners`. On failure we still apply the
     //    headless Service (done) and ensure the cluster-id Secret + adopt
@@ -2020,18 +2056,28 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
     //    an empty per-broker ConfigMap so existing TOML keys reflect
     //    "no broker should boot". The spec describes this as
     //    "existing objects are not deleted; surface the error and wait."
-    let validation = validate_listeners(
-        &obj.spec.listeners,
-        obj.spec.inter_broker_listener_name.as_deref(),
-    );
-
     // Effective listeners: synthesize the default when
-    // `spec.listeners` is empty.
-    let effective_listeners: Vec<Listener> = if obj.spec.listeners.is_empty() {
+    // `spec.listeners` is empty, then add the reserved mTLS-only operator
+    // endpoint. User traffic never needs the operator credential.
+    let mut effective_listeners: Vec<Listener> = if obj.spec.listeners.is_empty() {
         vec![synthesized_default_listener()]
     } else {
         obj.spec.listeners.clone()
     };
+    let validation = validate_listeners(
+        &effective_listeners,
+        obj.spec.inter_broker_listener_name.as_deref(),
+    )
+    .and_then(|()| {
+        listeners::validate_operator_principal_isolation(
+            &effective_listeners,
+            obj.spec.authorization.is_some() || obj.spec.delegation_token.is_some(),
+        )
+    });
+    let operator_listener = operator_listener(&effective_listeners);
+    let operator_listener_name = operator_listener.name.clone();
+    let operator_listener_port = operator_listener.port;
+    effective_listeners.push(operator_listener);
     let inter_broker_name = effective_inter_broker_listener_name(
         &obj.spec.listeners,
         obj.spec.inter_broker_listener_name.as_deref(),
@@ -2065,17 +2111,13 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
         .and_then(|s| s.metadata_version.as_deref());
     let (version_cond, resolved_metadata) = evaluate_kafka_version(&obj);
     let target_metadata = resolved_metadata.clone();
-    let inter_broker_port = effective_listeners
-        .iter()
-        .find(|listener| listener.name == inter_broker_name)
-        .map_or(common::BROKER_PORT, |listener| listener.port);
     let pools_rolled =
         pools_rolled_to_version(&pools.items, &statefulsets.items, &obj.spec.kafka_version);
     let (version_cond, resolved_metadata, finalize_failed) = match reconcile_metadata_version(
         &ctx,
         &ns,
         &name,
-        inter_broker_port,
+        operator_listener_port,
         resolved_metadata.as_deref(),
         finalized_metadata,
         pools_rolled,
@@ -2167,6 +2209,7 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
             namespace: &ns,
             name: &name,
             effective_listeners: &effective_listeners,
+            operator_listener_name: &operator_listener_name,
             inter_broker_name: &inter_broker_name,
             logging_filter: logging_filter.as_deref(),
             service_api: &svc_api,
@@ -2587,6 +2630,68 @@ mod tests {
         let (ready, reason, _) = rollup_condition(&r);
         assert!(!ready);
         assert!(reason == "NoNodePools");
+    }
+
+    #[test]
+    fn controller_nodes_advertise_the_operator_listener() {
+        let operator = listeners::operator_listener(&[]);
+        let prefixed_user_listener = Listener {
+            name: "OPERATORPUBLIC".into(),
+            port: 19091,
+            type_: crate::crd::ListenerType::Internal,
+            tls: true,
+            authentication: None,
+            configuration: None,
+            network_policy_peers: None,
+        };
+        let controller = NodeInfo {
+            broker_id: 0,
+            pod_name: "demo-controllers-0".into(),
+            pod_fqdn: "demo-controllers-0.demo-broker-headless.ns.svc.cluster.local".into(),
+            roles: vec![NodeRole::Controller],
+        };
+        let addresses = resolve_addresses_per_broker(
+            &[operator.clone(), prefixed_user_listener.clone()],
+            "INTERNAL",
+            &operator.name,
+            &[controller],
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap();
+        assert!(addresses[&0].contains_key(&operator.name));
+        assert!(!addresses[&0].contains_key(&prefixed_user_listener.name));
+    }
+
+    #[test]
+    fn ca_reissue_excludes_a_legacy_reserved_operator_user() {
+        let mut users = vec![
+            serde_json::from_value(serde_json::json!({
+                "apiVersion": "krabka.io/v1alpha1",
+                "kind": "KafkaUser",
+                "metadata": { "name": "demo-operator-admin" },
+                "spec": { "authentication": { "type": "tls" } }
+            }))
+            .unwrap(),
+            serde_json::from_value(serde_json::json!({
+                "apiVersion": "krabka.io/v1alpha1",
+                "kind": "KafkaUser",
+                "metadata": { "name": "other-operator-identity" },
+                "spec": { "authentication": { "type": "tls" } }
+            }))
+            .unwrap(),
+            serde_json::from_value(serde_json::json!({
+                "apiVersion": "krabka.io/v1alpha1",
+                "kind": "KafkaUser",
+                "metadata": { "name": "alice" },
+                "spec": { "authentication": { "type": "tls" } }
+            }))
+            .unwrap(),
+        ];
+        exclude_reserved_operator_user(&mut users, "demo");
+        assert!(users.len() == 1);
+        assert!(users[0].name_any() == "alice");
     }
 
     #[test]

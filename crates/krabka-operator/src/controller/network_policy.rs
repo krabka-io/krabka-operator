@@ -45,7 +45,7 @@ use crate::{
     crd::{Kafka, Listener, NetworkPolicyPeer},
 };
 
-const OPERATOR_LABEL: &str = "krabka-operator";
+const OPERATOR_COMPONENT_LABEL: &str = "operator";
 
 /// Render the `NetworkPolicy`. This is a pure function of the Kafka CR, the
 /// effective listeners, the inter-broker listener port, and the
@@ -54,6 +54,7 @@ pub(crate) fn render_network_policy(
     owner: &Kafka,
     effective_listeners: &[Listener],
     inter_broker_port: i32,
+    operator_namespace: &str,
     metrics_enabled: bool,
 ) -> Result<NetworkPolicy, ReconcileError> {
     let name = owner.meta().name.clone().unwrap_or_default();
@@ -72,13 +73,23 @@ pub(crate) fn render_network_policy(
 
     // Operator allow-rule peer (one peer used across all listener rules).
     let mut operator_match: BTreeMap<String, String> = BTreeMap::new();
-    operator_match.insert("app.kubernetes.io/name".into(), OPERATOR_LABEL.into());
+    operator_match.insert(
+        "app.kubernetes.io/component".into(),
+        OPERATOR_COMPONENT_LABEL.into(),
+    );
+    let operator_namespace_match = BTreeMap::from([(
+        "kubernetes.io/metadata.name".into(),
+        operator_namespace.into(),
+    )]);
     let operator_peer = K8sPeer {
         pod_selector: Some(LabelSelector {
             match_labels: Some(operator_match),
             match_expressions: None,
         }),
-        namespace_selector: None,
+        namespace_selector: Some(LabelSelector {
+            match_labels: Some(operator_namespace_match),
+            match_expressions: None,
+        }),
         ip_block: None,
     };
 
@@ -119,7 +130,18 @@ pub(crate) fn render_network_policy(
     //    None → allow-all (rule with empty `from`).
     //    Some([]) → skip (default-deny applies to that port).
     //    Some(peers) → convert to k8s peers + restrict.
+    let default_listeners = [crate::controller::listeners::synthesized_default_listener()];
+    let operator_name =
+        crate::controller::listeners::operator_listener(if owner.spec.listeners.is_empty() {
+            &default_listeners
+        } else {
+            &owner.spec.listeners
+        })
+        .name;
     for l in effective_listeners {
+        if l.name == operator_name {
+            continue;
+        }
         let rule_from = match l.network_policy_peers.as_deref() {
             None => Some(vec![]),
             Some([]) => continue,
@@ -221,6 +243,7 @@ pub(crate) async fn reconcile_network_policy(
         owner,
         effective_listeners,
         inter_broker_port,
+        &ctx.config.operator_namespace,
         metrics_enabled,
     ) {
         Ok(np) => np,
@@ -303,7 +326,8 @@ mod tests {
     #[test]
     fn render_emits_inter_broker_rule() {
         let listeners = vec![internal_listener("PLAIN", 9092, None)];
-        let np = render_network_policy(&test_kafka(), &listeners, 9092, false).unwrap();
+        let np =
+            render_network_policy(&test_kafka(), &listeners, 9092, "krabka-system", false).unwrap();
         let spec = np.spec.as_ref().unwrap();
         let inter = spec.ingress.as_ref().unwrap().first().unwrap();
         let from = inter.from.as_ref().unwrap();
@@ -320,7 +344,8 @@ mod tests {
             internal_listener("PLAIN", 9092, None),
             internal_listener("EXTRA", 9094, None),
         ];
-        let np = render_network_policy(&test_kafka(), &listeners, 9092, false).unwrap();
+        let np =
+            render_network_policy(&test_kafka(), &listeners, 9092, "krabka-system", false).unwrap();
         let spec = np.spec.as_ref().unwrap();
         let ingress = spec.ingress.as_ref().unwrap();
 
@@ -333,15 +358,25 @@ mod tests {
                         p.pod_selector.as_ref().is_some_and(|s| {
                             s.match_labels
                                 .as_ref()
-                                .and_then(|m| m.get("app.kubernetes.io/name"))
+                                .and_then(|m| m.get("app.kubernetes.io/component"))
                                 .map(String::as_str)
-                                == Some(OPERATOR_LABEL)
+                                == Some(OPERATOR_COMPONENT_LABEL)
                         })
                     })
                 })
             })
             .collect();
         assert!(operator_rules.len() == 2);
+        for rule in &operator_rules {
+            let namespace = &rule.from.as_ref().unwrap()[0]
+                .namespace_selector
+                .as_ref()
+                .unwrap()
+                .match_labels
+                .as_ref()
+                .unwrap()["kubernetes.io/metadata.name"];
+            assert!(namespace == "krabka-system");
+        }
         let ports: Vec<i32> = operator_rules
             .iter()
             .map(|r| match &r.ports.as_ref().unwrap()[0].port {
@@ -356,9 +391,30 @@ mod tests {
     }
 
     #[test]
+    fn operator_listener_has_no_allow_all_rule() {
+        let kafka = test_kafka();
+        let base = [internal_listener("PLAIN", 9092, None)];
+        let mut listeners = base.to_vec();
+        listeners.push(crate::controller::listeners::operator_listener(&base));
+        let np = render_network_policy(&kafka, &listeners, 9092, "krabka-system", false).unwrap();
+        let rules = rules_targeting_port(&np, crate::controller::listeners::OPERATOR_LISTENER_PORT);
+        assert!(
+            rules
+                .iter()
+                .all(|rule| rule.from.as_ref().is_some_and(|from| !from.is_empty()))
+        );
+        assert!(rules.iter().any(|rule| {
+            rule.from
+                .as_ref()
+                .is_some_and(|from| from.iter().any(|peer| peer.namespace_selector.is_some()))
+        }));
+    }
+
+    #[test]
     fn render_unset_peers_listener_emits_allow_all() {
         let listeners = vec![internal_listener("PLAIN", 9092, None)];
-        let np = render_network_policy(&test_kafka(), &listeners, 9092, false).unwrap();
+        let np =
+            render_network_policy(&test_kafka(), &listeners, 9092, "krabka-system", false).unwrap();
         // Filter for the per-listener rule (not the operator-allow, not the inter-broker self_peer).
         let rules_on_9092 = rules_targeting_port(&np, 9092);
         // Expected rules on 9092: inter-broker self_peer, operator-allow, per-listener allow-all.
@@ -375,7 +431,8 @@ mod tests {
     #[test]
     fn render_empty_peers_listener_skips_port_rule() {
         let listeners = vec![internal_listener("PLAIN", 9092, Some(vec![]))];
-        let np = render_network_policy(&test_kafka(), &listeners, 9092, false).unwrap();
+        let np =
+            render_network_policy(&test_kafka(), &listeners, 9092, "krabka-system", false).unwrap();
         let rules_on_9092 = rules_targeting_port(&np, 9092);
         // Expected: inter-broker self_peer rule + operator-allow rule. No
         // per-listener rule (deny-all -> skipped).
@@ -405,7 +462,8 @@ mod tests {
             namespace_selector: None,
         };
         let listeners = vec![internal_listener("PLAIN", 9092, Some(vec![peer]))];
-        let np = render_network_policy(&test_kafka(), &listeners, 9092, false).unwrap();
+        let np =
+            render_network_policy(&test_kafka(), &listeners, 9092, "krabka-system", false).unwrap();
         let rules_on_9092 = rules_targeting_port(&np, 9092);
 
         // Find the per-listener rule whose peer carries our custom label.
@@ -431,7 +489,8 @@ mod tests {
     #[test]
     fn render_metrics_enabled_emits_metrics_port_rule() {
         let listeners = vec![internal_listener("PLAIN", 9092, None)];
-        let np = render_network_policy(&test_kafka(), &listeners, 9092, true).unwrap();
+        let np =
+            render_network_policy(&test_kafka(), &listeners, 9092, "krabka-system", true).unwrap();
         let rules_on_9404 = rules_targeting_port(&np, METRICS_PORT);
         assert!(rules_on_9404.len() == 1);
         // Allow-all on metrics (empty `from`).
@@ -446,7 +505,8 @@ mod tests {
     #[test]
     fn render_metrics_disabled_no_metrics_port_rule() {
         let listeners = vec![internal_listener("PLAIN", 9092, None)];
-        let np = render_network_policy(&test_kafka(), &listeners, 9092, false).unwrap();
+        let np =
+            render_network_policy(&test_kafka(), &listeners, 9092, "krabka-system", false).unwrap();
         let rules_on_9404 = rules_targeting_port(&np, METRICS_PORT);
         assert!(
             rules_on_9404.is_empty(),
@@ -457,7 +517,14 @@ mod tests {
     #[test]
     fn render_pod_selector_matches_pool_pods() {
         let listeners = vec![internal_listener("PLAIN", BROKER_PORT, None)];
-        let np = render_network_policy(&test_kafka(), &listeners, BROKER_PORT, false).unwrap();
+        let np = render_network_policy(
+            &test_kafka(),
+            &listeners,
+            BROKER_PORT,
+            "krabka-system",
+            false,
+        )
+        .unwrap();
         let sel = np
             .spec
             .as_ref()
@@ -475,7 +542,8 @@ mod tests {
     #[test]
     fn render_policy_types_ingress_only() {
         let listeners = vec![internal_listener("PLAIN", 9092, None)];
-        let np = render_network_policy(&test_kafka(), &listeners, 9092, false).unwrap();
+        let np =
+            render_network_policy(&test_kafka(), &listeners, 9092, "krabka-system", false).unwrap();
         let spec = np.spec.as_ref().unwrap();
         assert!(spec.policy_types.as_ref().unwrap() == &vec!["Ingress".to_string()]);
         assert!(spec.egress.is_none());
@@ -484,7 +552,8 @@ mod tests {
     #[test]
     fn render_name_and_namespace() {
         let listeners = vec![internal_listener("PLAIN", 9092, None)];
-        let np = render_network_policy(&test_kafka(), &listeners, 9092, false).unwrap();
+        let np =
+            render_network_policy(&test_kafka(), &listeners, 9092, "krabka-system", false).unwrap();
         assert!(np.metadata.name.as_deref() == Some("demo-broker-policy"));
         assert!(np.metadata.namespace.as_deref() == Some("default"));
     }
@@ -492,7 +561,8 @@ mod tests {
     #[test]
     fn render_owner_ref_set() {
         let listeners = vec![internal_listener("PLAIN", 9092, None)];
-        let np = render_network_policy(&test_kafka(), &listeners, 9092, false).unwrap();
+        let np =
+            render_network_policy(&test_kafka(), &listeners, 9092, "krabka-system", false).unwrap();
         let refs = np.metadata.owner_references.as_ref().unwrap();
         assert!(
             refs == &vec![

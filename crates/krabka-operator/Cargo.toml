@@ -62,6 +62,7 @@ strum = { workspace = true }
 time = { version = "0.3", default-features = false, features = ["macros", "parsing", "formatting"] }
 toml = { workspace = true }
 thiserror = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
 tower = { workspace = true }
 tracing = { workspace = true }
@@ -80,4 +81,3 @@ assert2 = { workspace = true }
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
-tempfile = { workspace = true }

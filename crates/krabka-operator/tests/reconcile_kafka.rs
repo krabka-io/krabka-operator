@@ -368,6 +368,7 @@ fn happy_path_rules(
             response: json_response(200, &fake_configmap_body(&cm_name, namespace)),
         },
     ];
+    rules.extend(shared::operator_admin_rules(name, namespace));
     // 16. PATCH each pool to inject the controller owner-ref. The pool
     //    reconciler doesn't set this itself — the Kafka reconciler is
     //    the one that adopts existing pools labeled
@@ -457,20 +458,21 @@ async fn kafka_applies_service_configmap_secret_no_statefulset() {
         .collect();
 
     // The reconcile makes CA + keystore calls. With 1 pool the sequence is:
-    //   1. PATCH service
-    //   2. GET cluster-id secret (404)  3. POST cluster-id secret (201)
-    //   4-7. GET/PATCH cluster-ca key+cert (new CA generated)
-    //   8-11. GET/PATCH clients-ca key+cert (new CA generated)
-    //   12. GET kafkanodepools
-    //   13. GET statefulsets
-    //   14. GET pods
-    //   15-16. GET/PATCH broker keystore
-    //   17. PATCH configmap
-    //   18. PATCH pool owner-ref
-    //   19. PATCH kafka status
+    //   1-2. PATCH headless and controller-bootstrap services
+    //   3. GET cluster-id secret (404)  4. POST cluster-id secret (201)
+    //   5-8. GET/PATCH cluster-ca key+cert (new CA generated)
+    //   9-12. GET/PATCH clients-ca key+cert (new CA generated)
+    //   13-14. GET/PATCH operator admin identity
+    //   15. GET kafkanodepools
+    //   16. GET statefulsets
+    //   17. GET pods
+    //   18-19. GET/PATCH broker keystore
+    //   20. PATCH configmap
+    //   21. PATCH pool owner-ref
+    //   22. PATCH kafka status
     assert!(
-        observed.len() == 19,
-        "expected exactly 19 requests (includes CA + keystore calls), \
+        observed.len() == 22,
+        "expected exactly 22 requests (includes services, CA, operator identity, and keystore calls), \
          saw {}: {:?}",
         observed.len(),
         methods_and_uris
@@ -498,12 +500,18 @@ async fn kafka_applies_service_configmap_secret_no_statefulset() {
         ),
         (
             1,
+            Method::PATCH,
+            "/services/demo-controller-bootstrap",
+            "patch the controller bootstrap service",
+        ),
+        (
+            2,
             Method::GET,
             "/secrets/demo-cluster-id",
             "get the cluster-id secret",
         ),
         (
-            2,
+            3,
             Method::POST,
             "/namespaces/y/secrets",
             "create the cluster-id secret",
@@ -523,9 +531,10 @@ async fn kafka_applies_service_configmap_secret_no_statefulset() {
     }
 
     // Steps 4-11: CA secret lifecycle.
-    // After the POST, the next 8 requests are CA-related GETs and PATCHes.
+    // After the POST, the next 8 requests are CA-related GETs and PATCHes,
+    // followed by the operator admin identity lifecycle.
 
-    // Step 12: pool list.
+    // Pool list.
     let pool_list_req = methods_and_uris
         .iter()
         .find(|(m, u)| *m == Method::GET && u.contains("/kafkanodepools"))
@@ -564,11 +573,11 @@ async fn kafka_applies_service_configmap_secret_no_statefulset() {
     );
 
     // Status patch is last.
-    check!(methods_and_uris[18].0 == Method::PATCH);
+    let (status_method, status_uri) = methods_and_uris.last().expect("status request");
+    check!(*status_method == Method::PATCH);
     check!(
-        methods_and_uris[18].1.contains("/kafkas/demo/status"),
-        "step 19 should patch Kafka status: {}",
-        methods_and_uris[18].1
+        status_uri.contains("/kafkas/demo/status"),
+        "last step should patch Kafka status: {status_uri}"
     );
 
     check!(
@@ -1370,11 +1379,17 @@ async fn kafka_status_synthesized_default_listener_is_valid_and_ready() {
     let listeners = body["status"]["listeners"]
         .as_array()
         .unwrap_or_else(|| panic!("status.listeners array, body = {body}"));
-    assert!(listeners.len() == 1, "body = {body}");
+    assert!(listeners.len() == 2, "body = {body}");
     check!(listeners[0]["name"] == "PLAIN", "body = {body}");
     check!(listeners[0]["type"] == "internal", "body = {body}");
     check!(
         listeners[0]["bootstrapServers"] == "demo-broker-headless.y.svc.cluster.local:9092",
+        "body = {body}"
+    );
+    check!(listeners[1]["name"] == "OPERATOR", "body = {body}");
+    check!(listeners[1]["type"] == "internal", "body = {body}");
+    check!(
+        listeners[1]["bootstrapServers"] == "demo-broker-headless.y.svc.cluster.local:9091",
         "body = {body}"
     );
 
@@ -1431,8 +1446,8 @@ async fn kafka_mtls_without_tls_blocks_broker_configmap_and_sets_conditions() {
     for r in &observed {
         let uri = r.uri().to_string();
         assert!(
-            !uri.contains("-bootstrap"),
-            "no bootstrap Service should be applied for invalid listeners: {uri}"
+            !uri.contains("-ext-bootstrap"),
+            "no external bootstrap Service should be applied for invalid listeners: {uri}"
         );
     }
 

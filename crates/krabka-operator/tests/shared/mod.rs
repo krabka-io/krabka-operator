@@ -79,7 +79,7 @@ pub fn mock_client(state: &Arc<MockState>, default_ns: &str) -> Client {
         async move {
             let (parts, body) = req.into_parts();
             let bytes = body.collect().await.unwrap().to_bytes();
-            let captured = Request::from_parts(parts.clone(), bytes);
+            let captured = Request::from_parts(parts.clone(), bytes.clone());
             state.observed.lock().unwrap().push(captured);
 
             // FIFO: walk the rule list, take the first match.
@@ -92,13 +92,33 @@ pub fn mock_client(state: &Arc<MockState>, default_ns: &str) -> Client {
                 pos.map(|i| rules.remove(i)).map(|r| r.response)
             };
 
-            let response = response.unwrap_or_else(|| {
-                Response::builder()
-                    .status(404)
-                    .header("content-type", "application/json")
-                    .body(not_found_body("unexpected"))
-                    .expect("404 response builds")
-            });
+            // Every Kafka reconcile now applies the internal controller
+            // bootstrap Service. Accept that common SSA request here so the
+            // feature-specific FIFO fixtures need not duplicate it.
+            let controller_bootstrap_apply = parts.method == Method::PATCH
+                && parts
+                    .uri
+                    .path()
+                    .rsplit('/')
+                    .next()
+                    .is_some_and(|name| name.ends_with("-controller-bootstrap"));
+            let response = response
+                .or_else(|| {
+                    controller_bootstrap_apply.then(|| {
+                        Response::builder()
+                            .status(200)
+                            .header("content-type", "application/json")
+                            .body(bytes.to_vec())
+                            .expect("controller bootstrap response builds")
+                    })
+                })
+                .unwrap_or_else(|| {
+                    Response::builder()
+                        .status(404)
+                        .header("content-type", "application/json")
+                        .body(not_found_body("unexpected"))
+                        .expect("404 response builds")
+                });
 
             let (rp, rb) = response.into_parts();
             Ok::<_, kube::Error>(Response::from_parts(rp, kube::client::Body::from(rb)))
@@ -142,6 +162,26 @@ pub fn fake_secret_body(name: &str, namespace: &str, cluster_id: &str) -> serde_
         "type": "Opaque",
         "data": { "clusterId": b64 },
     })
+}
+
+pub fn operator_admin_rules(name: &str, namespace: &str) -> Vec<MockRule> {
+    let secret = format!("{name}-operator-identity");
+    vec![
+        MockRule {
+            method: Method::GET,
+            path_substr: format!("/secrets/{secret}"),
+            response: Response::builder()
+                .status(404)
+                .header("content-type", "application/json")
+                .body(not_found_body("not found"))
+                .expect("404"),
+        },
+        MockRule {
+            method: Method::PATCH,
+            path_substr: format!("/secrets/{secret}"),
+            response: json_response(200, &fake_secret_body(&secret, namespace, "")),
+        },
+    ]
 }
 
 /// JSON body shaped like an `apps/v1/StatefulSet`. `ready_replicas: None`
@@ -465,6 +505,7 @@ pub fn op_config(namespace: &str) -> OperatorConfig {
         client_frame_max: krabka_units::mebibytes(100),
         log_filter: "info".into(),
         default_broker_image: None,
+        default_shell_image: None,
         default_gateway_image: None,
         default_connector_image: None,
         default_schema_registry_image: None,
@@ -561,6 +602,7 @@ pub fn happy_path_rules(
     let cluster_ca_cert = format!("{name}-cluster-ca-cert");
     let clients_ca_key = format!("{name}-clients-ca");
     let clients_ca_cert = format!("{name}-clients-ca-cert");
+    let operator_admin = format!("{name}-operator-identity");
     let keystore_name = format!("{name}-kafka-brokers");
 
     let mut rules = vec![
@@ -645,6 +687,20 @@ pub fn happy_path_rules(
             method: Method::PATCH,
             path_substr: format!("/secrets/{clients_ca_cert}"),
             response: json_response(200, &fake_ca_secret(&clients_ca_cert, namespace)),
+        },
+        MockRule {
+            method: Method::GET,
+            path_substr: format!("/secrets/{operator_admin}"),
+            response: Response::builder()
+                .status(404)
+                .header("content-type", "application/json")
+                .body(not_found_body("not found"))
+                .expect("404"),
+        },
+        MockRule {
+            method: Method::PATCH,
+            path_substr: format!("/secrets/{operator_admin}"),
+            response: json_response(200, &fake_secret_body(&operator_admin, namespace, "")),
         },
         MockRule {
             method: Method::GET,

@@ -708,6 +708,7 @@ async fn nodeport_listener_external_san_added_to_per_broker_cert() {
         path_substr: format!("/services/{bootstrap_svc}"),
         response: json_response(200, &fake_bootstrap_svc),
     });
+    rules.extend(shared::operator_admin_rules(name, ns));
 
     let (ctx, state) = build_ctx(ns, rules);
 

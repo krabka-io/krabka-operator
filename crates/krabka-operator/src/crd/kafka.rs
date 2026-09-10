@@ -1503,11 +1503,9 @@ pub struct OpaAuthorization {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1000))]
     pub expire_after_ms: Option<i64>,
-    /// Principal strings that bypass OPA. The broker's internal calls, such
-    /// as replication, use `ANONYMOUS` by default. `ANONYMOUS` MUST be a
-    /// super-user for the inter-broker traffic to work when `type: opa` is
-    /// selected. An empty list means no super-users, and OPA then decides
-    /// every request.
+    /// Principal strings that bypass OPA. The operator appends its mTLS
+    /// principal so controller-owned admin operations remain available. It
+    /// never appends `ANONYMOUS`; users must opt into that grant explicitly.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub super_users: Vec<String>,
 }

@@ -24,7 +24,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use crate::{
     controller::{
         cluster_ca::{self, WhichCa},
-        common::{FIELD_MANAGER, ReconcileError, read_pem_key},
+        common::{FIELD_MANAGER, ReconcileError, owner_ref, read_pem_key},
     },
     crd::{Authentication, Kafka, KafkaUser, user::TlsAuth},
 };
@@ -35,6 +35,134 @@ pub(crate) const DEFAULT_VALIDITY_DAYS: u32 = 365;
 /// Default renewal window in days, used when `TlsAuth::renewal_days` is
 /// absent.
 pub(crate) const DEFAULT_RENEWAL_DAYS: u32 = 30;
+// `@` is forbidden in Kubernetes object names, so no KafkaUser can ever
+// receive this certificate subject.
+pub(crate) const OPERATOR_IDENTITY: &str = "krabka-operator@internal";
+const OPERATOR_IDENTITY_ANNOTATION: &str = "krabka.io/internal-operator-identity";
+
+#[must_use]
+pub(crate) fn operator_secret_name(cluster: &str) -> String {
+    format!("{cluster}-operator-identity")
+}
+
+fn is_operator_identity_secret(secret: &Secret) -> bool {
+    secret
+        .metadata
+        .annotations
+        .as_ref()
+        .and_then(|annotations| annotations.get(OPERATOR_IDENTITY_ANNOTATION))
+        .map(String::as_str)
+        == Some("true")
+}
+
+/// Reconciles the operator's mTLS identity against the operator-only cluster CA.
+/// The trust bundle is updated before an old CA is pruned, while the leaf is
+/// replaced whenever its signer changes or it enters the renewal window.
+pub(crate) async fn ensure_operator_cert_secret(
+    secret_api: &Api<Secret>,
+    kafka: &Kafka,
+    signing_material: &CaMaterial,
+    broker_trust_bundle_pem: &str,
+) -> Result<UserCertStatus, ReconcileError> {
+    let name = operator_secret_name(&kafka.name_any());
+    let existing = secret_api.get_opt(&name).await?;
+    if existing
+        .as_ref()
+        .is_some_and(|secret| !is_operator_identity_secret(secret))
+    {
+        return Err(ReconcileError::Malformed(format!(
+            "Secret {name:?} already exists and is not an operator identity"
+        )));
+    }
+    if let Some(existing) = existing
+        && let Some(not_after) = read_user_cert_not_after(&existing)
+        && !is_cert_expiring_soon(&not_after, DEFAULT_RENEWAL_DAYS, OffsetDateTime::now_utc())
+        && read_pem_key(&existing, "user.crt").is_some_and(|cert| {
+            cert_is_signed_by(&cert, &signing_material.cert_pem)
+                && cert_common_name(&cert).as_deref() == Some(OPERATOR_IDENTITY)
+                && read_pem_key(&existing, "user.key")
+                    .is_some_and(|key| cert_matches_private_key(&cert, &key))
+        })
+    {
+        if read_pem_key(&existing, "ca.crt").as_deref() != Some(broker_trust_bundle_pem) {
+            let patch = Secret {
+                data: Some(
+                    [(
+                        "ca.crt".into(),
+                        ByteString(broker_trust_bundle_pem.as_bytes().to_vec()),
+                    )]
+                    .into(),
+                ),
+                ..Default::default()
+            };
+            secret_api
+                .patch(&name, &PatchParams::default(), &Patch::Merge(&patch))
+                .await?;
+        }
+        return Ok(UserCertStatus {
+            not_after: format_rfc3339(not_after)?,
+            issued_new: false,
+        });
+    }
+
+    let cert = ca::issue_user_cert(
+        &signing_material.cert_pem,
+        &signing_material.key_pem,
+        OPERATOR_IDENTITY,
+        DEFAULT_VALIDITY_DAYS,
+    )?;
+    let labels = [
+        (
+            "app.kubernetes.io/managed-by".into(),
+            "krabka-operator".into(),
+        ),
+        ("krabka.io/cluster".into(), kafka.name_any()),
+        ("krabka.io/auth".into(), "tls".into()),
+    ]
+    .into();
+    let data = [
+        (
+            "user.crt".into(),
+            ByteString(cert.cert_pem.as_bytes().to_vec()),
+        ),
+        (
+            "user.key".into(),
+            ByteString(cert.key_pem.as_bytes().to_vec()),
+        ),
+        (
+            "ca.crt".into(),
+            ByteString(broker_trust_bundle_pem.as_bytes().to_vec()),
+        ),
+    ]
+    .into();
+    let secret = Secret {
+        metadata: ObjectMeta {
+            name: Some(name.clone()),
+            namespace: kafka.namespace(),
+            labels: Some(labels),
+            annotations: Some(BTreeMap::from([(
+                OPERATOR_IDENTITY_ANNOTATION.into(),
+                "true".into(),
+            )])),
+            owner_references: Some(vec![owner_ref::<Kafka>(kafka)?]),
+            ..Default::default()
+        },
+        type_: Some("Opaque".into()),
+        data: Some(data),
+        ..Default::default()
+    };
+    secret_api
+        .patch(
+            &name,
+            &PatchParams::apply(FIELD_MANAGER).force(),
+            &Patch::Apply(&secret),
+        )
+        .await?;
+    Ok(UserCertStatus {
+        not_after: cert.not_after,
+        issued_new: true,
+    })
+}
 
 /// Outcome of `ensure_user_cert_secret`. The status update reads it.
 #[derive(Debug, Clone)]
@@ -229,6 +357,40 @@ fn cert_is_signed_by(cert_pem: &str, ca_cert_pem: &str) -> bool {
     cert.verify_signature(Some(ca.public_key())).is_ok()
 }
 
+fn cert_matches_private_key(cert_pem: &str, key_pem: &str) -> bool {
+    use rustls::pki_types::{PrivateKeyDer, pem::PemObject as _};
+    use x509_parser::pem::parse_x509_pem;
+
+    let Ok(key) = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()) else {
+        return false;
+    };
+    let Ok(signing_key) = rustls::crypto::ring::sign::any_supported_type(&key) else {
+        return false;
+    };
+    let Some(key_spki) = signing_key.public_key() else {
+        return false;
+    };
+    let Ok((_, cert_pem)) = parse_x509_pem(cert_pem.as_bytes()) else {
+        return false;
+    };
+    let Ok(cert) = cert_pem.parse_x509() else {
+        return false;
+    };
+    cert.public_key().raw == key_spki.as_ref()
+}
+
+fn cert_common_name(pem: &str) -> Option<String> {
+    use x509_parser::pem::parse_x509_pem;
+    let (_, pem) = parse_x509_pem(pem.as_bytes()).ok()?;
+    let cert = pem.parse_x509().ok()?;
+    cert.subject()
+        .iter_common_name()
+        .next()?
+        .as_str()
+        .ok()
+        .map(str::to_owned)
+}
+
 fn render_user_cert_secret(
     obj: &KafkaUser,
     user_cert: &ca::UserCert,
@@ -305,6 +467,23 @@ mod tests {
     }
 
     #[test]
+    fn operator_identity_marker_rejects_unmanaged_secret_collisions() {
+        let unmanaged = Secret::default();
+        assert!(!is_operator_identity_secret(&unmanaged));
+        let managed = Secret {
+            metadata: ObjectMeta {
+                annotations: Some(BTreeMap::from([(
+                    OPERATOR_IDENTITY_ANNOTATION.into(),
+                    "true".into(),
+                )])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(is_operator_identity_secret(&managed));
+    }
+
+    #[test]
     fn is_cert_expiring_soon_boundary_cases() {
         let now = OffsetDateTime::now_utc();
 
@@ -340,6 +519,14 @@ mod tests {
     }
 
     #[test]
+    fn certificate_common_name_is_verified() {
+        let ca = ca::generate_clients_ca("test-root", 365).expect("ca");
+        let cert =
+            ca::issue_user_cert(&ca.cert_pem, &ca.key_pem, OPERATOR_IDENTITY, 365).expect("leaf");
+        assert!(cert_common_name(&cert.cert_pem).as_deref() == Some(OPERATOR_IDENTITY));
+    }
+
+    #[test]
     fn cert_not_after_from_pem_returns_none_on_malformed_input() {
         // The last case is valid PEM framing with a garbage body —
         // exercises the parse_x509 failure branch.
@@ -361,6 +548,16 @@ mod tests {
 
         assert!(cert_is_signed_by(&user.cert_pem, &old_ca.cert_pem));
         assert!(!cert_is_signed_by(&user.cert_pem, &new_ca.cert_pem));
+    }
+
+    #[test]
+    fn user_certificate_matches_only_its_private_key() {
+        let ca = ca::generate_clients_ca("ca", 365).expect("CA");
+        let alice = ca::issue_user_cert(&ca.cert_pem, &ca.key_pem, "alice", 365).expect("alice");
+        let bob = ca::issue_user_cert(&ca.cert_pem, &ca.key_pem, "bob", 365).expect("bob");
+        assert!(cert_matches_private_key(&alice.cert_pem, &alice.key_pem));
+        assert!(!cert_matches_private_key(&alice.cert_pem, &bob.key_pem));
+        assert!(!cert_matches_private_key(&alice.cert_pem, "bad key"));
     }
 
     #[test]

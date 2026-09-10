@@ -1,7 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
+use k8s_openapi::api::core::v1::Secret;
 use krabka_client_admin::{AdminClient, AdminClientLike};
-use kube::Client;
+use krabka_security::ListenerProtocol;
+use kube::{Api, Client};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -10,11 +12,20 @@ use crate::{
     telemetry::{ControllerMetrics, SharedRegistry},
 };
 
-/// Boxed-dyn admin client handle.
-///
-/// Tests substitute a fake here and open no TCP connection. Production
-/// code wraps a real `AdminClient`.
-pub type AdminClientHandle = Arc<Mutex<dyn AdminClientLike + Send>>;
+/// Boxed-dyn admin client handle. The optional TLS material shares the
+/// handle's lifetime, so cache eviction cannot remove files still used by an
+/// in-flight lazy connection.
+#[derive(Clone)]
+pub struct AdminClientHandle {
+    inner: Arc<Mutex<dyn AdminClientLike + Send>>,
+    _material: Option<Arc<tempfile::TempDir>>,
+}
+
+impl AdminClientHandle {
+    pub(crate) async fn lock(&self) -> tokio::sync::MutexGuard<'_, dyn AdminClientLike + Send> {
+        self.inner.lock().await
+    }
+}
 
 /// Boxed-dyn rebalancer client handle.
 ///
@@ -74,13 +85,64 @@ impl Context {
     /// is out of range, or if the connection to `bootstrap` fails.
     pub async fn admin_client_for(
         &self,
+        namespace: &str,
         cluster: &str,
         bootstrap: &str,
     ) -> Result<AdminClientHandle, krabka_client_admin::AdminError> {
+        if let Some(client) = self.admin_clients.lock().await.get(cluster).cloned() {
+            return Ok(client);
+        }
+        let secret_name = crate::controller::user_tls::operator_secret_name(cluster);
+        let secret = Api::<Secret>::namespaced(self.client.clone(), namespace)
+            .get(&secret_name)
+            .await
+            .map_err(|error| {
+                krabka_client_admin::AdminError::Protocol(format!(
+                    "operator identity Secret {namespace}/{secret_name}: {error}"
+                ))
+            })?;
+        let version = secret
+            .metadata
+            .resource_version
+            .as_deref()
+            .unwrap_or("unknown");
         let mut map = self.admin_clients.lock().await;
-        let key = format!("{cluster}\0{bootstrap}");
+        let prefix = format!("{cluster}\0{namespace}\0{bootstrap}\0");
+        let key = format!("{prefix}{version}");
         if let Some(client) = map.get(&key).or_else(|| map.get(cluster)) {
             return Ok(client.clone());
+        }
+        let data = secret.data.as_ref().ok_or_else(|| {
+            krabka_client_admin::AdminError::Protocol(format!(
+                "operator identity Secret {namespace}/{secret_name} has no data"
+            ))
+        })?;
+        let value = |name: &str| {
+            data.get(name)
+                .map(|value| value.0.as_slice())
+                .ok_or_else(|| {
+                    krabka_client_admin::AdminError::Protocol(format!(
+                        "operator identity Secret {namespace}/{secret_name} has no {name}"
+                    ))
+                })
+        };
+        let material = tempfile::tempdir().map_err(|error| {
+            krabka_client_admin::AdminError::Protocol(format!("operator identity tempdir: {error}"))
+        })?;
+        let ca_path = material.path().join("ca.crt");
+        let cert_path = material.path().join("user.crt");
+        let key_path = material.path().join("user.key");
+        for (path, bytes) in [
+            (&ca_path, value("ca.crt")?),
+            (&cert_path, value("user.crt")?),
+            (&key_path, value("user.key")?),
+        ] {
+            std::fs::write(path, bytes).map_err(|error| {
+                krabka_client_admin::AdminError::Protocol(format!(
+                    "write operator identity {}: {error}",
+                    path.display()
+                ))
+            })?;
         }
         let admin = AdminClient::connect_with_options(
             &[bootstrap.to_string()],
@@ -93,11 +155,27 @@ impl Context {
                     self.config.client_frame_max,
                 )
                 .map_err(krabka_client_admin::AdminError::Protocol)?,
+                security: Some(Box::new(krabka_client_core::ClientSecurity {
+                    protocol: ListenerProtocol::Ssl,
+                    tls: Some(krabka_client_core::TlsConnectorConfig {
+                        trust_roots_pem: Some(ca_path),
+                        server_name: format!(
+                            "{cluster}-broker-headless.{namespace}.svc.cluster.local"
+                        ),
+                        client_identity: Some((cert_path, key_path)),
+                    }),
+                    sasl: None,
+                    sasl_host: None,
+                })),
                 ..krabka_client_core::ConnectionOptions::default()
             },
         )
         .await?;
-        let entry: AdminClientHandle = Arc::new(Mutex::new(admin));
+        let entry = AdminClientHandle {
+            inner: Arc::new(Mutex::new(admin)),
+            _material: Some(Arc::new(material)),
+        };
+        map.retain(|cached, _| !cached.starts_with(&prefix));
         map.insert(key, entry.clone());
         Ok(entry)
     }
@@ -121,11 +199,17 @@ impl Context {
     /// There is no `cfg` gate on this function. It stays in the public
     /// API. In production it does no damage and nothing calls it. Without
     /// the gate, the build needs no parallel test-only profile.
-    pub async fn insert_admin_client_for_test(&self, cluster: &str, admin: AdminClientHandle) {
-        self.admin_clients
-            .lock()
-            .await
-            .insert(cluster.to_string(), admin);
+    pub async fn insert_admin_client_for_test<T>(&self, cluster: &str, admin: Arc<Mutex<T>>)
+    where
+        T: AdminClientLike + Send + 'static,
+    {
+        self.admin_clients.lock().await.insert(
+            cluster.to_string(),
+            AdminClientHandle {
+                inner: admin,
+                _material: None,
+            },
+        );
     }
 
     /// Looks up a rebalancer client for `endpoint`, or builds one.

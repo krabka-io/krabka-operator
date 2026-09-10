@@ -23,7 +23,7 @@ use shared::{
     fake_topic_body, fixture_ctx, json_response, mock_client, not_found_body,
 };
 
-/// JSON body shaped like a Ready Kafka with one PLAIN internal listener. The
+/// JSON body shaped like a Ready Kafka with its reserved operator listener. The
 /// finalizer-add-path test below uses it. The topic reconciler reads the Ready
 /// condition and the listener bootstrap from it.
 fn ready_kafka_body(name: &str, namespace: &str) -> serde_json::Value {
@@ -44,10 +44,10 @@ fn ready_kafka_body(name: &str, namespace: &str) -> serde_json::Value {
                 "lastTransitionTime": "2026-05-17T00:00:00Z",
             }],
             "listeners": [{
-                "name": "PLAIN",
+                "name": "OPERATOR",
                 "type": "internal",
                 "bootstrapServers": format!(
-                    "{name}-broker-headless.{namespace}.svc.cluster.local:9092"
+                    "{name}-broker-headless.{namespace}.svc.cluster.local:9091"
                 ),
                 "addresses": [],
             }],

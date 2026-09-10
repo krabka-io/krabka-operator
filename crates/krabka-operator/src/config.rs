@@ -106,6 +106,10 @@ pub struct OperatorConfig {
     #[arg(long, env = "DEFAULT_BROKER_IMAGE")]
     pub default_broker_image: Option<String>,
 
+    /// BusyBox image copied into distroless broker pods for lifecycle scripts.
+    #[arg(long, env = "DEFAULT_SHELL_IMAGE")]
+    pub default_shell_image: Option<String>,
+
     /// Default gateway image used when `KafkaGrpcGateway.spec.image` is unset.
     #[arg(long, env = "DEFAULT_GATEWAY_IMAGE")]
     pub default_gateway_image: Option<String>,

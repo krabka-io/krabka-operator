@@ -49,10 +49,15 @@ jobs:
   # anyone without the CLI, and is what the nightly job runs.
   ci:
     name: build · test · lint · format
-    if: github.event_name != 'schedule'
+    needs: kind-lifecycle
+    if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
+      - name: require kind lifecycle
+        env:
+          KIND_LIFECYCLE_RESULT: ${{ needs.kind-lifecycle.result }}
+        run: test "${KIND_LIFECYCLE_RESULT}" = success
       - uses: actions/checkout@v7
         with:
           # Change detection needs the merge base, not just the tip.

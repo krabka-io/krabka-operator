@@ -20,7 +20,7 @@ use futures::StreamExt as _;
 use k8s_openapi::{
     api::{
         apps::v1::StatefulSet,
-        core::v1::{PersistentVolumeClaim, Pod, PodSpec, ResourceRequirements, Secret},
+        core::v1::{PersistentVolumeClaim, Pod, PodSpec, ResourceRequirements, Secret, Service},
         policy::v1::PodDisruptionBudget,
     },
     apimachinery::pkg::api::resource::Quantity,
@@ -43,6 +43,7 @@ use crate::{
             self, APP_LABEL, BROKER_PORT, DEFAULT_BROKER_IMAGE, ReconcileError, apply_object,
             common_labels, condition, derive_status, owner_ref, parent_version_gate,
         },
+        listeners,
         rebalance::RebalanceState,
     },
     crd::{
@@ -60,6 +61,8 @@ use crate::{
 pub(crate) const METRICS_PORT: i32 = 9404;
 /// Broker-native `/healthz` and `/readyz` HTTP endpoint.
 pub(crate) const HEALTH_PORT: i32 = 9405;
+const SHELL_IMAGE: &str =
+    "busybox@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0";
 const FINALIZER: &str = "krabka.io/kafka-node-pool-finalizer";
 const MAX_NODE_ID: i32 = 999_999;
 const NODE_ID_START_ANNOTATION: &str = "krabka.io/node-id-start";
@@ -561,9 +564,9 @@ mkdir -p /var/lib/krabka/data\n\
 rm -rf /var/lib/krabka/data/lost+found\n\
 if [ ! -f /var/lib/krabka/data/.formatted ]; then\n\
   if [ \"$KRABKA_QUORUM_BOOTSTRAP_INITIALIZED\" != \"true\" ] && [ \"$NODE_ID\" = \"$KRABKA_QUORUM_BOOTSTRAP_NODE_ID\" ] && [ \"$KRABKA_POOL_NAME\" = \"$KRABKA_QUORUM_BOOTSTRAP_POOL\" ]; then\n\
-    /usr/bin/krabka format --log-dir /var/lib/krabka/data --cluster-id \"$KRABKA_CLUSTER_ID\" --release-version \"$KRABKA_METADATA_VERSION\" --directory-id \"$KRABKA_DIRECTORY_ID\" --standalone --node-id \"$NODE_ID\" --controller-listener \"${HOSTNAME}.${KRABKA_HEADLESS_SERVICE}.${POD_NAMESPACE}.svc.cluster.local:9093\"\n\
+    /usr/bin/krabka-format --log-dir /var/lib/krabka/data --cluster-id \"$KRABKA_CLUSTER_ID\" --release-version \"$KRABKA_METADATA_VERSION\" --directory-id \"$KRABKA_DIRECTORY_ID\" --standalone --node-id \"$NODE_ID\" --controller-listener \"${HOSTNAME}.${KRABKA_HEADLESS_SERVICE}.${POD_NAMESPACE}.svc.cluster.local:9093\"\n\
   else\n\
-    /usr/bin/krabka format --log-dir /var/lib/krabka/data --cluster-id \"$KRABKA_CLUSTER_ID\" --release-version \"$KRABKA_METADATA_VERSION\" --directory-id \"$KRABKA_DIRECTORY_ID\" --no-initial-controllers\n\
+    /usr/bin/krabka-format --log-dir /var/lib/krabka/data --cluster-id \"$KRABKA_CLUSTER_ID\" --release-version \"$KRABKA_METADATA_VERSION\" --directory-id \"$KRABKA_DIRECTORY_ID\" --no-initial-controllers\n\
   fi\n\
   touch /var/lib/krabka/data/.formatted\n\
 fi\n\
@@ -649,7 +652,7 @@ fn render_init_container(
     json!({
         "name": "format",
         "image": broker_image,
-        "command": ["/bin/sh", "-c"],
+        "command": ["/run/krabka/busybox", "sh", "-c"],
         "args": [INIT_SCRIPT],
         "env": [
             { "name": "NODE_ID_START", "value": node_id_start.to_string() },
@@ -660,11 +663,13 @@ fn render_init_container(
             { "name": "KRABKA_QUORUM_BOOTSTRAP_NODE_ID", "valueFrom": { "secretKeyRef": { "name": secret_name, "key": common::QUORUM_BOOTSTRAP_NODE_ID_KEY } } },
             { "name": "KRABKA_QUORUM_BOOTSTRAP_POOL", "valueFrom": { "secretKeyRef": { "name": secret_name, "key": common::QUORUM_BOOTSTRAP_POOL_KEY } } },
             { "name": "KRABKA_QUORUM_BOOTSTRAP_INITIALIZED", "valueFrom": { "secretKeyRef": { "name": secret_name, "key": common::QUORUM_BOOTSTRAP_INITIALIZED_KEY } } },
-            { "name": "KRABKA_METADATA_VERSION", "value": metadata_version.to_string() }
+            { "name": "KRABKA_METADATA_VERSION", "value": metadata_version.to_string() },
+            { "name": "PATH", "value": "/run/krabka/bin" }
         ],
         "volumeMounts": [
             { "name": "data", "mountPath": "/var/lib/krabka/data" },
-            { "name": "cluster-id", "mountPath": "/etc/krabka/cluster-id", "readOnly": true }
+            { "name": "cluster-id", "mountPath": "/etc/krabka/cluster-id", "readOnly": true },
+            { "name": "broker-runtime", "mountPath": "/run/krabka" }
         ],
         "securityContext": {
             "allowPrivilegeEscalation": false,
@@ -676,6 +681,37 @@ fn render_init_container(
             "limits": { "cpu": "100m", "memory": "128Mi" }
         }
     })
+}
+
+fn render_shell_init_container(shell_image: &str) -> serde_json::Value {
+    json!({
+        "name": "install-shell",
+        "image": shell_image,
+        "command": ["/bin/sh", "-c"],
+        "args": ["mkdir -p /run/krabka/bin && cp /bin/busybox /run/krabka/busybox && /run/krabka/busybox --install /run/krabka/bin"],
+        "volumeMounts": [{ "name": "broker-runtime", "mountPath": "/run/krabka" }],
+        "securityContext": {
+            "allowPrivilegeEscalation": false,
+            "readOnlyRootFilesystem": true,
+            "capabilities": { "drop": ["ALL"] }
+        },
+        "resources": {
+            "requests": { "cpu": "5m", "memory": "8Mi" },
+            "limits": { "cpu": "50m", "memory": "32Mi" }
+        }
+    })
+}
+
+fn preserve_live_pod_management_policy(desired: &mut StatefulSet, live: Option<&StatefulSet>) {
+    let Some(live_policy) = live
+        .and_then(|sts| sts.spec.as_ref())
+        .and_then(|spec| spec.pod_management_policy.clone())
+    else {
+        return;
+    };
+    if let Some(spec) = desired.spec.as_mut() {
+        spec.pod_management_policy = Some(live_policy);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -740,6 +776,7 @@ fn render_broker_container(spec: BrokerContainerSpec<'_>) -> serde_json::Value {
         json!({ "name": "POD_NAME", "valueFrom": { "fieldRef": { "fieldPath": "metadata.name" } } }),
         json!({ "name": "POD_NAMESPACE", "valueFrom": { "fieldRef": { "fieldPath": "metadata.namespace" } } }),
         json!({ "name": "KRABKA_CLUSTER_ID", "valueFrom": { "secretKeyRef": { "name": secret_name, "key": "clusterId" } } }),
+        json!({ "name": "PATH", "value": "/run/krabka/bin" }),
     ];
     if let Some(roles) = process_roles {
         env.push(json!({ "name": "KRABKA_PROCESS_ROLES", "value": roles }));
@@ -941,7 +978,7 @@ fn render_broker_container(spec: BrokerContainerSpec<'_>) -> serde_json::Value {
     json!({
         "name": "broker",
         "image": broker_image,
-        "command": ["/bin/sh", "-c"],
+        "command": ["/run/krabka/busybox", "sh", "-c"],
         "args": [main_script],
         "env": env,
         "ports": ports,
@@ -1351,10 +1388,20 @@ fn separated_process_roles(roles: &[NodeRole]) -> Option<&'static str> {
 /// parent — `kubectl delete knp <pool>` deletes the `StatefulSet`
 /// directly.
 // linear render pipeline: pod template + storage + per-feature wiring
+#[cfg(test)]
 pub(crate) fn render_statefulset(
     parent: &Kafka,
     pool: &KafkaNodePool,
     broker_image: &str,
+) -> Result<StatefulSet, ReconcileError> {
+    render_statefulset_with_shell(parent, pool, broker_image, SHELL_IMAGE)
+}
+
+fn render_statefulset_with_shell(
+    parent: &Kafka,
+    pool: &KafkaNodePool,
+    broker_image: &str,
+    shell_image: &str,
 ) -> Result<StatefulSet, ReconcileError> {
     let parent_name = parent.meta().name.clone().unwrap_or_default();
     let pool_name = pool.meta().name.clone().unwrap_or_default();
@@ -1528,7 +1575,7 @@ pub(crate) fn render_statefulset(
             "fsGroup": 65532,
             "seccompProfile": { "type": "RuntimeDefault" }
         },
-        "initContainers": [init],
+        "initContainers": [render_shell_init_container(shell_image), init],
         "containers": [main],
         "volumes": [{ "name": "data", "emptyDir": {} }],
         "terminationGracePeriodSeconds": parent
@@ -1611,10 +1658,12 @@ pub(crate) fn render_statefulset(
     let retention_policy =
         render_pvc_retention_policy(pool.spec.storage.as_ref(), tier_storage_persistence);
 
+    // Joining controllers need their peer DNS records before they can become
+    // Ready; OrderedReady deadlocks initial multi-controller formation.
     let mut sts_spec = json!({
         "serviceName": service_name,
         "replicas": pool.spec.replicas,
-        "podManagementPolicy": "OrderedReady",
+        "podManagementPolicy": "Parallel",
         "updateStrategy": { "type": "RollingUpdate" },
         "selector": { "matchLabels": selector },
         "template": {
@@ -2000,11 +2049,30 @@ async fn set_finalizer(
     Ok(())
 }
 
-fn quorum_bootstrap_address(cluster: &str, namespace: &str) -> String {
-    format!(
+async fn operator_bootstrap_address(
+    ctx: &Context,
+    cluster: &str,
+    namespace: &str,
+) -> Result<String, ReconcileError> {
+    let service = Api::<Service>::namespaced(ctx.client.clone(), namespace)
+        .get_opt(&format!("{cluster}-broker-headless"))
+        .await?;
+    let port = service.map_or(Ok(listeners::OPERATOR_LISTENER_PORT), |service| {
+        service
+            .spec
+            .and_then(|spec| spec.ports)
+            .and_then(|ports| {
+                ports
+                    .into_iter()
+                    .find(|port| port.name.as_deref() == Some("operator-admin"))
+            })
+            .map(|port| port.port)
+            .ok_or_else(|| ReconcileError::Malformed("operator-admin Service port missing".into()))
+    })?;
+    Ok(format!(
         "{cluster}-broker-headless.{namespace}.svc.cluster.local:{}",
-        common::CONTROLLER_PORT
-    )
+        port
+    ))
 }
 
 async fn delete_deletion_rebalance(
@@ -2084,6 +2152,18 @@ async fn reconcile_deletion(
         Ok::<(), ReconcileError>(())
     };
 
+    if parent.is_none_or(|parent| parent.meta().deletion_timestamp.is_some()) {
+        scale_down.await?;
+        if !pods.items.is_empty() {
+            return Ok(common::requeue(ctx.config.controller_dependency_requeue));
+        }
+        if observed_roles & 1 != 0 {
+            delete_deletion_rebalance(ctx, namespace, cluster, name).await?;
+        }
+        set_finalizer(pool_api, pool, false).await?;
+        return Ok(Action::await_change());
+    }
+
     if observed_roles & 1 != 0
         && live_replicas > 0
         && let Some(action) = reconcile_broker_drain(BrokerDrainInput {
@@ -2102,18 +2182,6 @@ async fn reconcile_deletion(
         return Ok(action);
     }
 
-    if parent.is_none_or(|parent| parent.meta().deletion_timestamp.is_some()) {
-        scale_down.await?;
-        if !pods.items.is_empty() {
-            return Ok(common::requeue(ctx.config.controller_dependency_requeue));
-        }
-        if observed_roles & 1 != 0 {
-            delete_deletion_rebalance(ctx, namespace, cluster, name).await?;
-        }
-        set_finalizer(pool_api, pool, false).await?;
-        return Ok(Action::await_change());
-    }
-
     if observed_roles & 2 != 0 {
         /*
          * Keep each voter alive until its removal commits. Removing one node
@@ -2122,8 +2190,8 @@ async fn reconcile_deletion(
         let secret_api: Api<Secret> = Api::namespaced(ctx.client.clone(), namespace);
         let secret = secret_api.get(&format!("{cluster}-cluster-id")).await?;
         let cluster_id = common::uuid_from_secret(&secret)?;
-        let bootstrap = quorum_bootstrap_address(cluster, namespace);
-        let admin = match ctx.admin_client_for(cluster, &bootstrap).await {
+        let bootstrap = operator_bootstrap_address(ctx, cluster, namespace).await?;
+        let admin = match ctx.admin_client_for(namespace, cluster, &bootstrap).await {
             Ok(admin) => admin,
             Err(error) => {
                 tracing::warn!(%error, %cluster, "quorum admin connection failed during pool deletion");
@@ -2496,10 +2564,10 @@ async fn reconcile_broker_drain(
         .map(Some);
     }
 
-    let bootstrap = quorum_bootstrap_address(input.cluster, input.namespace);
+    let bootstrap = operator_bootstrap_address(input.ctx, input.cluster, input.namespace).await?;
     let admin = input
         .ctx
-        .admin_client_for(input.cluster, &bootstrap)
+        .admin_client_for(input.namespace, input.cluster, &bootstrap)
         .await?;
     let mut admin = admin.lock().await;
     let assignments = admin.describe_partition_assignments(&[]).await?;
@@ -2630,8 +2698,11 @@ async fn reconcile_controller_scale_down(
         .get(&format!("{}-cluster-id", input.cluster))
         .await?;
     let cluster_id = common::uuid_from_secret(&secret)?;
-    let address = quorum_bootstrap_address(input.cluster, input.namespace);
-    let admin = input.ctx.admin_client_for(input.cluster, &address).await?;
+    let address = operator_bootstrap_address(input.ctx, input.cluster, input.namespace).await?;
+    let admin = input
+        .ctx
+        .admin_client_for(input.namespace, input.cluster, &address)
+        .await?;
     let mut admin = admin.lock().await;
     let quorum = admin.describe_metadata_quorum().await?;
     let target = quorum
@@ -2799,8 +2870,16 @@ async fn evaluate_pool_readiness(
     if !input.pool.spec.roles.contains(&NodeRole::Controller) {
         return ("True", reason, message);
     }
-    let address = quorum_bootstrap_address(input.cluster, input.namespace);
-    let admin = match input.ctx.admin_client_for(input.cluster, &address).await {
+    let address = match operator_bootstrap_address(input.ctx, input.cluster, input.namespace).await
+    {
+        Ok(address) => address,
+        Err(error) => return ("False", "AdminUnavailable", error.to_string()),
+    };
+    let admin = match input
+        .ctx
+        .admin_client_for(input.namespace, input.cluster, &address)
+        .await
+    {
         Ok(admin) => admin,
         Err(error) => {
             return (
@@ -3024,7 +3103,15 @@ async fn reconcile_inner(
     }
 
     // 5. Render + apply the StatefulSet.
-    let sts = render_statefulset(&parent, &pool, &image)?;
+    let shell_image = ctx
+        .config
+        .default_shell_image
+        .as_deref()
+        .unwrap_or(SHELL_IMAGE);
+    let mut sts = render_statefulset_with_shell(&parent, &pool, &image, shell_image)?;
+    // podManagementPolicy is immutable. New multi-controller pools need
+    // Parallel startup, while existing pools must retain their live value.
+    preserve_live_pod_management_policy(&mut sts, observed_sts.as_ref());
     apply_object(&sts_api, &sts_name, &sts).await?;
     if pool.spec.roles.contains(&NodeRole::Broker) {
         let pdb_api: Api<PodDisruptionBudget> = Api::namespaced(ctx.client.clone(), &ns);
@@ -3330,12 +3417,11 @@ mod tests {
         assert!(spread.when_unsatisfiable == "DoNotSchedule");
         assert!(spread.node_taints_policy.as_deref() == Some("Honor"));
 
-        let resources = pod.init_containers.as_ref().unwrap()[0]
-            .resources
-            .as_ref()
-            .unwrap();
-        assert!(resources.requests.as_ref().unwrap().contains_key("memory"));
-        assert!(resources.limits.as_ref().unwrap().contains_key("memory"));
+        for init in pod.init_containers.as_ref().unwrap() {
+            let resources = init.resources.as_ref().expect("init resource bounds");
+            assert!(resources.requests.as_ref().unwrap().contains_key("memory"));
+            assert!(resources.limits.as_ref().unwrap().contains_key("memory"));
+        }
     }
 
     #[test]
@@ -3345,7 +3431,7 @@ mod tests {
         pool.spec.node_id_start = 42;
         let sts = render_statefulset(&parent, &pool, DEFAULT_BROKER_IMAGE).unwrap();
         let pod = sts.spec.unwrap().template.spec.unwrap();
-        let init = &pod.init_containers.expect("init containers")[0];
+        let init = &pod.init_containers.expect("init containers")[1];
 
         // The literal env entry should carry the rendered start id.
         let env = init.env.as_ref().expect("init env");
@@ -3363,14 +3449,14 @@ mod tests {
             script.contains("NODE_ID_START + ORDINAL"),
             "expected the init script to compute NODE_ID = NODE_ID_START + ORDINAL, got: {script}"
         );
-        // Regression: `krabka format` refuses to run when the log_dir
+        // Regression: `krabka-format` refuses to run when the log_dir
         // is non-empty. The init script must therefore write `.node-id`
         // *after* the format step, not before — otherwise the first
         // boot of an empty PVC fails with
         // "refusing to overwrite non-empty log_dir".
         let format_pos = script
-            .find("krabka format")
-            .expect("init script must invoke `krabka format`");
+            .find("krabka-format")
+            .expect("init script must invoke `krabka-format`");
         let node_id_write_pos = script
             .find(".node-id")
             .expect("init script must write .node-id");
@@ -3381,6 +3467,58 @@ mod tests {
              log_dir on the first boot of an empty PVC. \
              format at byte {format_pos}, .node-id at byte {node_id_write_pos}",
         );
+    }
+
+    #[test]
+    fn distroless_broker_uses_pinned_copied_shell() {
+        let sts = render_statefulset(
+            &parent_fixture("demo"),
+            &pool_fixture("brokers", "demo", 1),
+            DEFAULT_BROKER_IMAGE,
+        )
+        .unwrap();
+        let pod = sts.spec.unwrap().template.spec.unwrap();
+        let init = pod.init_containers.expect("init containers");
+        assert!(init[0].image.as_deref() == Some(SHELL_IMAGE));
+        assert!(init[1].command.as_deref().is_some_and(|command| command
+            == [
+                "/run/krabka/busybox".to_string(),
+                "sh".to_string(),
+                "-c".to_string(),
+            ]));
+        assert!(
+            pod.containers[0]
+                .command
+                .as_deref()
+                .is_some_and(|command| command
+                    == [
+                        "/run/krabka/busybox".to_string(),
+                        "sh".to_string(),
+                        "-c".to_string(),
+                    ])
+        );
+        assert!(!INIT_SCRIPT.contains("/usr/bin/krabka format"));
+        assert!(INIT_SCRIPT.contains("/usr/bin/krabka-format"));
+    }
+
+    #[test]
+    fn copied_shell_image_is_configurable() {
+        let sts = render_statefulset_with_shell(
+            &parent_fixture("demo"),
+            &pool_fixture("brokers", "demo", 1),
+            DEFAULT_BROKER_IMAGE,
+            "registry.internal/busybox@sha256:deadbeef",
+        )
+        .unwrap();
+        let init = sts
+            .spec
+            .unwrap()
+            .template
+            .spec
+            .unwrap()
+            .init_containers
+            .unwrap();
+        assert!(init[0].image.as_deref() == Some("registry.internal/busybox@sha256:deadbeef"));
     }
 
     #[test]
@@ -3423,7 +3561,7 @@ mod tests {
         let pool = pool_fixture("brokers", "demo", 3);
         let statefulset = render_statefulset(&parent, &pool, "img:1").unwrap();
         let spec = statefulset.spec.unwrap();
-        assert!(spec.pod_management_policy.as_deref() == Some("OrderedReady"));
+        assert!(spec.pod_management_policy.as_deref() == Some("Parallel"));
         assert!(spec.update_strategy.unwrap().type_.as_deref() == Some("RollingUpdate"));
         assert!(spec.template.spec.unwrap().termination_grace_period_seconds == Some(75));
 
@@ -3447,6 +3585,19 @@ mod tests {
         }))
         .unwrap();
         assert!(actual == expected);
+    }
+
+    #[test]
+    fn existing_statefulset_retains_immutable_pod_management_policy() {
+        let parent = parent_fixture("demo");
+        let pool = pool_fixture("brokers", "demo", 3);
+        let mut desired = render_statefulset(&parent, &pool, "img:1").unwrap();
+        let mut live = desired.clone();
+        live.spec.as_mut().unwrap().pod_management_policy = Some("OrderedReady".into());
+
+        preserve_live_pod_management_policy(&mut desired, Some(&live));
+
+        assert!(desired.spec.unwrap().pod_management_policy.as_deref() == Some("OrderedReady"));
     }
 
     #[test]
@@ -3478,7 +3629,7 @@ mod tests {
         let pool = pool_fixture("brokers", "demo", 1);
         let sts = render_statefulset(&parent37, &pool, DEFAULT_BROKER_IMAGE).unwrap();
         let pod = sts.spec.unwrap().template.spec.unwrap();
-        let init = &pod.init_containers.expect("init containers")[0];
+        let init = &pod.init_containers.expect("init containers")[1];
         let env = init.env.as_ref().expect("init env");
         let mv = env
             .iter()
@@ -3503,7 +3654,7 @@ mod tests {
         let pool = pool_fixture("brokers", "demo", 1);
         let sts = render_statefulset(&parent, &pool, DEFAULT_BROKER_IMAGE).unwrap();
         let pod = sts.spec.unwrap().template.spec.unwrap();
-        let init = &pod.init_containers.expect("init containers")[0];
+        let init = &pod.init_containers.expect("init containers")[1];
         let env = init.env.as_ref().expect("init env");
         let mv = env
             .iter()
