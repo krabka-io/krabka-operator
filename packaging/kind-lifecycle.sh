@@ -87,6 +87,7 @@ EOF
 kubectl wait kafkatopic/secured-admin-before-rotation --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=5m
 
 old_operator_cert="$(kubectl get secret m20-operator-admin -o jsonpath='{.data.user\.crt}')"
+old_statefulset_generation="$(kubectl get statefulset m20-brokers -o jsonpath='{.metadata.generation}')"
 kubectl annotate kafka m20 krabka.io/force-replace-clients-ca-key="$(date -u +%FT%TZ)" --overwrite
 for _ in $(seq 1 120); do
     new_operator_cert="$(kubectl get secret m20-operator-admin -o jsonpath='{.data.user\.crt}')"
@@ -96,6 +97,15 @@ for _ in $(seq 1 120); do
     sleep 5
 done
 [[ "${new_operator_cert:-}" != "${old_operator_cert}" ]]
+for _ in $(seq 1 120); do
+    new_statefulset_generation="$(kubectl get statefulset m20-brokers -o jsonpath='{.metadata.generation}')"
+    if ((new_statefulset_generation > old_statefulset_generation)); then
+        break
+    fi
+    sleep 5
+done
+((new_statefulset_generation > old_statefulset_generation))
+kubectl rollout status statefulset/m20-brokers --timeout=10m
 kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=10m
 kubectl apply -f - <<EOF
 apiVersion: krabka.io/v1alpha1
