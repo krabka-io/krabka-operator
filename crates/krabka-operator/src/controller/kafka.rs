@@ -933,7 +933,7 @@ fn exclude_reserved_operator_user(users: &mut Vec<KafkaUser>, cluster: &str) {
     let legacy = format!("{cluster}-operator-admin");
     users.retain(|user| {
         let name = user.name_any();
-        name != reserved && name != legacy
+        name != reserved && name != legacy && !name.ends_with("-operator-identity")
     });
 }
 
@@ -2671,6 +2671,13 @@ mod tests {
                 "apiVersion": "krabka.io/v1alpha1",
                 "kind": "KafkaUser",
                 "metadata": { "name": "demo-operator-admin" },
+                "spec": { "authentication": { "type": "tls" } }
+            }))
+            .unwrap(),
+            serde_json::from_value(serde_json::json!({
+                "apiVersion": "krabka.io/v1alpha1",
+                "kind": "KafkaUser",
+                "metadata": { "name": "other-operator-identity" },
                 "spec": { "authentication": { "type": "tls" } }
             }))
             .unwrap(),

@@ -3500,7 +3500,6 @@ pub(crate) fn render_broker_toml_with_operator(
     // `OpaAuthorization` CRD field — the broker's `FileOpaConfig` uses
     // `deny_unknown_fields` and only carries `maximum_cache_size`.
     let anonymous_inter_broker = delegation_token_enabled
-        && inter_broker_kerberos.is_none()
         && listeners
             .iter()
             .find(|listener| listener.name == inter_broker_listener_name)
