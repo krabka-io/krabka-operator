@@ -481,13 +481,11 @@ pub(crate) fn render_configmap(
                 .map(|adv| (*node_id, format!("{}:{CONTROLLER_PORT}", adv.host)))
         })
         .collect();
-    // Seed every node through the persisted, lowest-id bootstrap controller.
-    // The broker's bootstrap probe is fail-closed across the supplied list;
-    // including not-yet-listening peers makes a parallel cold start race.
+    // Keep every controller as a bootstrap fallback. StatefulSet startup is
+    // ordered, while broker auto-join rotates across unreachable seeds.
     let controller_bootstrap_servers: Vec<String> = controller_endpoints
-        .first()
+        .iter()
         .map(|(_, endpoint)| endpoint.clone())
-        .into_iter()
         .collect();
     let controller_quorum_voters: Vec<String> = controller_endpoints
         .iter()
@@ -1947,7 +1945,7 @@ mod cluster_object_tests {
             data["broker-1.toml"].contains("client_ca_path = \"/etc/krabka/cluster-ca/ca.crt\"")
         );
 
-        let expected = "bootstrap_servers = [\"host-a:9093\"]";
+        let expected = "bootstrap_servers = [\"host-a:9093\",\"host-b:9093\"]";
         // The controller TLS server-name is the shared headless-Service FQDN
         // (`<name>-broker-headless.<ns>.svc.cluster.local`), identical across
         // every broker — a SAN on each broker's serving cert.

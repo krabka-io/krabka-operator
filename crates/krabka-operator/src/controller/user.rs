@@ -1144,6 +1144,7 @@ fn validate_reserved_identity(name: &str, cluster: &str) -> Result<(), String> {
         || name == user_tls::OPERATOR_IDENTITY
         || name == format!("{cluster}-operator-admin")
         || name == user_tls::operator_secret_name(cluster)
+        || name.ends_with("-operator-identity")
     {
         return Err(format!(
             "KafkaUser name {name:?} is reserved for the operator"
@@ -1656,6 +1657,7 @@ mod tests {
         assert!(validate_reserved_identity("krabka-operator", "demo").is_err());
         assert!(validate_reserved_identity("demo-operator-admin", "demo").is_err());
         assert!(validate_reserved_identity("demo-operator-identity", "demo").is_err());
+        assert!(validate_reserved_identity("other-operator-identity", "demo").is_err());
         assert!(validate_reserved_identity("alice", "demo").is_ok());
     }
 

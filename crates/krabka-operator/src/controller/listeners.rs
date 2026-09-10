@@ -3059,16 +3059,16 @@ impl AuthorizationRender {
     ///
     /// The operator's authenticated mTLS principal is always appended so its
     /// admin API calls bypass user-managed ACLs.
-    fn from_spec(a: &crate::crd::kafka::Authorization) -> Self {
+    fn from_spec(a: &crate::crd::kafka::Authorization, include_anonymous: bool) -> Self {
         match a {
             crate::crd::kafka::Authorization::Simple(s) => Self {
                 kind: "simple",
-                super_users: merge_operator_principal(&s.super_users),
+                super_users: merge_operator_principals(&s.super_users, include_anonymous),
                 opa: None,
             },
             crate::crd::kafka::Authorization::Opa(o) => Self {
                 kind: "opa",
-                super_users: merge_operator_principal(&o.super_users),
+                super_users: merge_operator_principals(&o.super_users, include_anonymous),
                 opa: Some(AuthorizationOpaRender {
                     url: o.url.clone(),
                     allow_on_error: o.allow_on_error,
@@ -3098,8 +3098,11 @@ impl AuthorizationRender {
     }
 }
 
-fn merge_operator_principal(base: &[String]) -> Vec<String> {
+fn merge_operator_principals(base: &[String], include_anonymous: bool) -> Vec<String> {
     let mut out: Vec<String> = base.to_vec();
+    if include_anonymous && !out.iter().any(|principal| principal == "ANONYMOUS") {
+        out.push("ANONYMOUS".into());
+    }
     let principal =
         crate::controller::user_tls::tls_principal(crate::controller::user_tls::OPERATOR_IDENTITY);
     if !out.contains(&principal) {
@@ -3490,14 +3493,20 @@ pub(crate) fn render_broker_toml_with_operator(
     render_remote_storage(&mut out, tiered_storage);
 
     // An explicit authorizer always grants the authenticated operator
-    // principal. Delegation tokens without an explicit authorizer get the
-    // same minimal Simple authorizer. Anonymous access is never injected.
+    // principal. When delegation tokens use an unauthenticated inter-broker
+    // listener, retain that listener's ANONYMOUS replication principal too.
     //
     // We intentionally do NOT emit `initial_cache_capacity` from the
     // `OpaAuthorization` CRD field — the broker's `FileOpaConfig` uses
     // `deny_unknown_fields` and only carries `maximum_cache_size`.
+    let anonymous_inter_broker = delegation_token_enabled
+        && inter_broker_kerberos.is_none()
+        && listeners
+            .iter()
+            .find(|listener| listener.name == inter_broker_listener_name)
+            .is_some_and(|listener| listener.authentication.is_none());
     let authz_render = match (authorization, delegation_token_enabled) {
-        (Some(a), _) => Some(AuthorizationRender::from_spec(a)),
+        (Some(a), _) => Some(AuthorizationRender::from_spec(a, anonymous_inter_broker)),
         (None, true) => Some(AuthorizationRender::operator_simple()),
         (None, false) => None,
     };
@@ -4224,8 +4233,8 @@ mod toml_rendering_tests {
         ] {
             assert!(t.contains(needle), "needle {needle:?}, TOML:\n{t}");
         }
-        // Explicit authorization retains the user's list and appends only the
-        // authenticated operator identity.
+        // Explicit authorization retains the user's list, the anonymous
+        // default inter-broker principal, and the operator identity.
         let authz =
             crate::crd::kafka::Authorization::Simple(crate::crd::kafka::SimpleAuthorization {
                 super_users: vec!["User:admin".into()],
@@ -4238,10 +4247,25 @@ mod toml_rendering_tests {
             (&[], ""),
         );
         assert!(
-            t2.contains("super_users = [\"User:admin\", \"User:CN=krabka-operator@internal\"]"),
-            "operator principal must be merged into user-authored super_users, got:\n{t2}"
+            t2.contains(
+                "super_users = [\"User:admin\", \"ANONYMOUS\", \"User:CN=krabka-operator@internal\"]"
+            ),
+            "inter-broker and operator principals must be merged into user-authored super_users, got:\n{t2}"
         );
-        assert!(!t2.contains("\"ANONYMOUS\""));
+
+        let mut authenticated = synthesized_default_listener();
+        authenticated.authentication = Some(ListenerAuthentication::ScramSha512);
+        let t3 = render_broker_toml(
+            (0, &[authenticated], &addrs, "PLAIN"),
+            (&std::collections::BTreeMap::new(), None, None),
+            (true, Some(&authz), None),
+            None,
+            (&[], ""),
+        );
+        assert!(
+            t3.contains("super_users = [\"User:admin\", \"User:CN=krabka-operator@internal\"]")
+        );
+        assert!(!t3.contains("\"ANONYMOUS\""));
     }
 
     // ── tiered storage TOML render ───────────────────────────────────
