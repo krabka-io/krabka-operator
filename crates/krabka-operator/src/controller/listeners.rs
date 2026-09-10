@@ -3058,8 +3058,7 @@ impl AuthorizationRender {
     /// Builds the render from an explicit `Kafka.spec.authorization`.
     ///
     /// The operator's authenticated mTLS principal is always appended so its
-    /// admin API calls bypass user-managed ACLs without weakening anonymous
-    /// clients.
+    /// admin API calls bypass user-managed ACLs.
     fn from_spec(a: &crate::crd::kafka::Authorization) -> Self {
         match a {
             crate::crd::kafka::Authorization::Simple(s) => Self {
@@ -3083,12 +3082,17 @@ impl AuthorizationRender {
     /// Builds the injected default authorization block.
     ///
     /// Builds the minimal authorizer required for delegation-token act-as.
+    /// The synthesized default inter-broker listener is unauthenticated, so
+    /// its replication principal remains a super-user in this implicit mode.
     fn operator_simple() -> Self {
         Self {
             kind: "simple",
-            super_users: vec![crate::controller::user_tls::tls_principal(
-                crate::controller::user_tls::OPERATOR_IDENTITY,
-            )],
+            super_users: vec![
+                "ANONYMOUS".into(),
+                crate::controller::user_tls::tls_principal(
+                    crate::controller::user_tls::OPERATOR_IDENTITY,
+                ),
+            ],
             opa: None,
         }
     }
@@ -3278,6 +3282,11 @@ fn render_listener_sections(
     clients_ca_path: Option<&str>,
 ) {
     use std::fmt::Write as _;
+    let operator_listener_name = listeners
+        .split_last()
+        .and_then(|(candidate, user_listeners)| {
+            (candidate == &operator_listener(user_listeners)).then_some(candidate.name.as_str())
+        });
     for l in listeners {
         let adv = addresses
             .get(&l.name)
@@ -3306,8 +3315,14 @@ fn render_listener_sections(
                 "Disabled"
             };
             if needs_client_ca {
-                // Mounted at /etc/krabka/clients-ca/ca.crt by the broker pod template.
-                let client_ca = clients_ca_path.unwrap_or("/etc/krabka/clients-ca/ca.crt");
+                // The synthesized admin endpoint trusts only the cluster CA,
+                // whose key is operator-owned. User mTLS remains on the
+                // separately mounted clients CA.
+                let client_ca = if operator_listener_name == Some(l.name.as_str()) {
+                    "/etc/krabka/cluster-ca/ca.crt"
+                } else {
+                    clients_ca_path.unwrap_or("/etc/krabka/clients-ca/ca.crt")
+                };
                 let _ = writeln!(
                     out,
                     "tls_config = {{ cert_path = \"{cert_path}\", key_path = \"{key_path}\", client_ca_path = \"{client_ca}\", client_auth = \"{client_auth}\" }}"
@@ -3979,7 +3994,7 @@ mod toml_rendering_tests {
         for needle in [
             "[authorization]",
             "type = \"simple\"",
-            "super_users = [\"User:CN=krabka-operator@internal\"]",
+            "super_users = [\"ANONYMOUS\", \"User:CN=krabka-operator@internal\"]",
         ] {
             assert!(
                 t.contains(needle),
@@ -3992,7 +4007,13 @@ mod toml_rendering_tests {
         let authz = parsed
             .authorization
             .expect("[authorization] block must round-trip into FileConfig");
-        assert!(authz.super_users == vec!["User:CN=krabka-operator@internal".to_string()]);
+        assert!(
+            authz.super_users
+                == vec![
+                    "ANONYMOUS".to_string(),
+                    "User:CN=krabka-operator@internal".to_string()
+                ]
+        );
     }
 
     #[test]
@@ -4170,7 +4191,7 @@ mod toml_rendering_tests {
         for needle in [
             "[authorization]",
             "type = \"simple\"",
-            "super_users = [\"User:CN=krabka-operator@internal\"]",
+            "super_users = [\"ANONYMOUS\", \"User:CN=krabka-operator@internal\"]",
         ] {
             assert!(t.contains(needle), "needle {needle:?}, TOML:\n{t}");
         }
@@ -5599,6 +5620,33 @@ mod toml_rendering_tests {
         ] {
             assert!(toml.contains(needle), "missing {needle:?} in TOML: {toml}");
         }
+    }
+
+    #[test]
+    fn operator_listener_trusts_only_the_cluster_ca() {
+        use std::collections::BTreeMap;
+        let listener = operator_listener(&[]);
+        let mut addresses = BTreeMap::new();
+        addresses.insert(
+            listener.name.clone(),
+            AdvertisedAddress {
+                host: "broker-0".into(),
+                port: listener.port,
+            },
+        );
+        let toml = render_broker_toml(
+            (0, std::slice::from_ref(&listener), &addresses, "INTERNAL"),
+            (
+                &BTreeMap::new(),
+                None,
+                Some("/etc/krabka/clients-ca/ca.crt"),
+            ),
+            (false, None, None),
+            None,
+            (&[], ""),
+        );
+        assert!(toml.contains("client_ca_path = \"/etc/krabka/cluster-ca/ca.crt\""));
+        assert!(!toml.contains("client_ca_path = \"/etc/krabka/clients-ca/ca.crt\""));
     }
 
     // -----------------------------------------------------------------

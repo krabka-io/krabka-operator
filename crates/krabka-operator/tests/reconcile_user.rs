@@ -1277,6 +1277,36 @@ async fn tls_finalizer_filters_acls_by_dn() {
     );
 }
 
+#[tokio::test]
+async fn legacy_reserved_user_can_remove_its_finalizer() {
+    let name = "demo-operator-admin";
+    let rules = vec![
+        MockRule {
+            method: Method::GET,
+            path_substr: format!("/kafkas/{CLUSTER}"),
+            response: json_response(200, &ready_kafka_body(CLUSTER, NS)),
+        },
+        MockRule {
+            method: Method::PATCH,
+            path_substr: format!("/kafkausers/{name}"),
+            response: json_response(200, &user_body(name, NS)),
+        },
+    ];
+    let state = MockState::new(rules);
+    let client = mock_client(&state, NS);
+    let ctx = Arc::new(fixture_ctx(client, NS));
+    ctx.insert_admin_client_for_test(
+        CLUSTER,
+        Arc::new(tokio::sync::Mutex::new(FakeAdminClient::new())),
+    )
+    .await;
+
+    let mut user = ku_tls(name, vec![]);
+    user.metadata.deletion_timestamp = Some(Time("2026-05-18T00:00:00Z".parse().unwrap()));
+    reconcile(Arc::new(user), ctx).await.unwrap();
+    assert!(state.remaining_rules() == 0);
+}
+
 /// A TLS user with quotas keys the broker quota calls by the DN,
 /// `CN=alice`, and not by the plain name.
 #[tokio::test]

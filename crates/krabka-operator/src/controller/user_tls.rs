@@ -41,16 +41,16 @@ pub(crate) const OPERATOR_IDENTITY: &str = "krabka-operator@internal";
 
 #[must_use]
 pub(crate) fn operator_secret_name(cluster: &str) -> String {
-    format!("{cluster}-operator-admin")
+    format!("{cluster}-operator-identity")
 }
 
-/// Reconciles the operator's mTLS identity against the active clients CA.
+/// Reconciles the operator's mTLS identity against the operator-only cluster CA.
 /// The trust bundle is updated before an old CA is pruned, while the leaf is
 /// replaced whenever its signer changes or it enters the renewal window.
 pub(crate) async fn ensure_operator_cert_secret(
     secret_api: &Api<Secret>,
     kafka: &Kafka,
-    clients_ca_material: &CaMaterial,
+    signing_material: &CaMaterial,
     broker_trust_bundle_pem: &str,
 ) -> Result<UserCertStatus, ReconcileError> {
     let name = operator_secret_name(&kafka.name_any());
@@ -58,7 +58,7 @@ pub(crate) async fn ensure_operator_cert_secret(
         && let Some(not_after) = read_user_cert_not_after(&existing)
         && !is_cert_expiring_soon(&not_after, DEFAULT_RENEWAL_DAYS, OffsetDateTime::now_utc())
         && read_pem_key(&existing, "user.crt").is_some_and(|cert| {
-            cert_is_signed_by(&cert, &clients_ca_material.cert_pem)
+            cert_is_signed_by(&cert, &signing_material.cert_pem)
                 && cert_common_name(&cert).as_deref() == Some(OPERATOR_IDENTITY)
         })
     {
@@ -84,8 +84,8 @@ pub(crate) async fn ensure_operator_cert_secret(
     }
 
     let cert = ca::issue_user_cert(
-        &clients_ca_material.cert_pem,
-        &clients_ca_material.key_pem,
+        &signing_material.cert_pem,
+        &signing_material.key_pem,
         OPERATOR_IDENTITY,
         DEFAULT_VALIDITY_DAYS,
     )?;

@@ -929,7 +929,11 @@ struct CaPhaseInput<'a> {
 
 fn exclude_reserved_operator_user(users: &mut Vec<KafkaUser>, cluster: &str) {
     let reserved = user_tls::operator_secret_name(cluster);
-    users.retain(|user| user.name_any() != reserved);
+    let legacy = format!("{cluster}-operator-admin");
+    users.retain(|user| {
+        let name = user.name_any();
+        name != reserved && name != legacy
+    });
 }
 
 struct CaArtifacts {
@@ -1103,7 +1107,7 @@ async fn reconcile_cas(input: CaPhaseInput<'_>) -> Result<CaPhaseResult, Reconci
     user_tls::ensure_operator_cert_secret(
         secret_api,
         obj,
-        &clients_ca_outcome.signing_material,
+        &cluster_ca_outcome.signing_material,
         &cluster_ca_outcome.trust_bundle_pem,
     )
     .await?;

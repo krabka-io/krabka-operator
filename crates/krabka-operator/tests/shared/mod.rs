@@ -145,7 +145,7 @@ pub fn fake_secret_body(name: &str, namespace: &str, cluster_id: &str) -> serde_
 }
 
 pub fn operator_admin_rules(name: &str, namespace: &str) -> Vec<MockRule> {
-    let secret = format!("{name}-operator-admin");
+    let secret = format!("{name}-operator-identity");
     vec![
         MockRule {
             method: Method::GET,
@@ -582,7 +582,7 @@ pub fn happy_path_rules(
     let cluster_ca_cert = format!("{name}-cluster-ca-cert");
     let clients_ca_key = format!("{name}-clients-ca");
     let clients_ca_cert = format!("{name}-clients-ca-cert");
-    let operator_admin = format!("{name}-operator-admin");
+    let operator_admin = format!("{name}-operator-identity");
     let keystore_name = format!("{name}-kafka-brokers");
 
     let mut rules = vec![

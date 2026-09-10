@@ -69,7 +69,7 @@ kubectl wait --for=create statefulset/m20-brokers --timeout=2m
 kubectl rollout status statefulset/m20-brokers --timeout=10m
 kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=10m
 kubectl wait kafkanodepool/brokers --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=10m
-kubectl get secret m20-operator-admin >/dev/null
+kubectl get secret m20-operator-identity >/dev/null
 broker_config="$(kubectl get configmap m20-broker-config -o jsonpath='{.data.broker-0\.toml}')"
 grep -q 'name = "OPERATOR"' <<<"${broker_config}"
 grep -q 'protocol = "Ssl"' <<<"${broker_config}"
@@ -101,12 +101,12 @@ spec:
 EOF
 kubectl wait kafkauser/secured-admin-user --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=5m
 
-old_operator_cert="$(kubectl get secret m20-operator-admin -o jsonpath='{.data.user\.crt}')"
+old_operator_cert="$(kubectl get secret m20-operator-identity -o jsonpath='{.data.user\.crt}')"
 old_statefulset_generation="$(kubectl get statefulset m20-brokers -o jsonpath='{.metadata.generation}')"
-kubectl annotate kafka m20 krabka.io/force-replace-clients-ca-key="$(date -u +%FT%TZ)" --overwrite
+kubectl annotate kafka m20 krabka.io/force-replace-ca-key="$(date -u +%FT%TZ)" --overwrite
 kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="CaRotation")].status}'=True --timeout=2m
 for _ in $(seq 1 120); do
-    new_operator_cert="$(kubectl get secret m20-operator-admin -o jsonpath='{.data.user\.crt}')"
+    new_operator_cert="$(kubectl get secret m20-operator-identity -o jsonpath='{.data.user\.crt}')"
     if [[ -n "${new_operator_cert}" && "${new_operator_cert}" != "${old_operator_cert}" ]]; then
         break
     fi
@@ -159,6 +159,7 @@ for _ in $(seq 1 120); do
     sleep 5
 done
 ((stable_observations >= 12))
+kubectl annotate kafkanodepool brokers krabka.io/evidence-refresh="$(date -u +%FT%TZ)" --overwrite
 kubectl wait kafkanodepool/brokers --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=2m
 kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout=10m
 kubectl apply -f - <<EOF
@@ -182,4 +183,4 @@ kubectl logs -n krabka-system -l app.kubernetes.io/name=krabka-operator --all-co
 printf '%s\n' "${old_operator_cert}" >"${evidence}/operator-cert-before.base64"
 printf '%s\n' "${new_operator_cert}" >"${evidence}/operator-cert-after.base64"
 (cd "${evidence}" && sha256sum kafka.json pool.json user.json statefulset.json pods.txt operator.log operator-cert-*.base64 krabka-operator-*.tgz >SHA256SUMS)
-echo "PASS: mTLS operator admin survived clients-CA credential rotation"
+echo "PASS: mTLS operator admin survived cluster-CA credential rotation"

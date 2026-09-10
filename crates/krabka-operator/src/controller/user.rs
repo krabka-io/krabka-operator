@@ -558,7 +558,9 @@ async fn prepare_user(obj: &KafkaUser, ctx: &Context) -> Result<UserPreparation,
             ctx.config.controller_drift_requeue,
         )));
     };
-    if let Err(message) = validate_reserved_identity(&name, &cluster) {
+    if obj.meta().deletion_timestamp.is_none()
+        && let Err(message) = validate_reserved_identity(&name, &cluster)
+    {
         patch_status(
             &user_api,
             &name,
@@ -1140,6 +1142,7 @@ fn validate_spec(spec: &crate::crd::KafkaUserSpec) -> Result<(), String> {
 fn validate_reserved_identity(name: &str, cluster: &str) -> Result<(), String> {
     if name == "krabka-operator"
         || name == user_tls::OPERATOR_IDENTITY
+        || name == format!("{cluster}-operator-admin")
         || name == user_tls::operator_secret_name(cluster)
     {
         return Err(format!(
@@ -1652,6 +1655,7 @@ mod tests {
     fn validate_reserved_identity_rejects_operator_principal_and_secret_names() {
         assert!(validate_reserved_identity("krabka-operator", "demo").is_err());
         assert!(validate_reserved_identity("demo-operator-admin", "demo").is_err());
+        assert!(validate_reserved_identity("demo-operator-identity", "demo").is_err());
         assert!(validate_reserved_identity("alice", "demo").is_ok());
     }
 
