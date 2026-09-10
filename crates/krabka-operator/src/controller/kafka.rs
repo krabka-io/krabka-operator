@@ -841,10 +841,11 @@ fn resolve_addresses_per_broker(
     let mut out: BTreeMap<i32, BTreeMap<String, AdvertisedAddress>> = BTreeMap::new();
     for b in brokers {
         let mut listener_map: BTreeMap<String, AdvertisedAddress> = BTreeMap::new();
-        for l in effective_listeners
-            .iter()
-            .filter(|listener| b.is_broker() || listener.name == inter_broker_listener_name)
-        {
+        for l in effective_listeners.iter().filter(|listener| {
+            b.is_broker()
+                || listener.name == inter_broker_listener_name
+                || listener.name.starts_with(listeners::OPERATOR_LISTENER_NAME)
+        }) {
             let pod_node = pods_by_name
                 .get(&b.pod_name)
                 .and_then(|p| p.spec.as_ref())
@@ -2042,8 +2043,16 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
     let validation = validate_listeners(
         &effective_listeners,
         obj.spec.inter_broker_listener_name.as_deref(),
-    );
-    effective_listeners.push(operator_listener(&effective_listeners));
+    )
+    .and_then(|()| {
+        listeners::validate_operator_principal_isolation(
+            &effective_listeners,
+            obj.spec.authorization.is_some() || obj.spec.delegation_token.is_some(),
+        )
+    });
+    let operator_listener = operator_listener(&effective_listeners);
+    let operator_listener_port = operator_listener.port;
+    effective_listeners.push(operator_listener);
     let inter_broker_name = effective_inter_broker_listener_name(
         &obj.spec.listeners,
         obj.spec.inter_broker_listener_name.as_deref(),
@@ -2077,17 +2086,13 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
         .and_then(|s| s.metadata_version.as_deref());
     let (version_cond, resolved_metadata) = evaluate_kafka_version(&obj);
     let target_metadata = resolved_metadata.clone();
-    let inter_broker_port = effective_listeners
-        .iter()
-        .find(|listener| listener.name == listeners::OPERATOR_LISTENER_NAME)
-        .map_or(listeners::OPERATOR_LISTENER_PORT, |listener| listener.port);
     let pools_rolled =
         pools_rolled_to_version(&pools.items, &statefulsets.items, &obj.spec.kafka_version);
     let (version_cond, resolved_metadata, finalize_failed) = match reconcile_metadata_version(
         &ctx,
         &ns,
         &name,
-        inter_broker_port,
+        operator_listener_port,
         resolved_metadata.as_deref(),
         finalized_metadata,
         pools_rolled,
@@ -2599,6 +2604,27 @@ mod tests {
         let (ready, reason, _) = rollup_condition(&r);
         assert!(!ready);
         assert!(reason == "NoNodePools");
+    }
+
+    #[test]
+    fn controller_nodes_advertise_the_operator_listener() {
+        let operator = listeners::operator_listener(&[]);
+        let controller = NodeInfo {
+            broker_id: 0,
+            pod_name: "demo-controllers-0".into(),
+            pod_fqdn: "demo-controllers-0.demo-broker-headless.ns.svc.cluster.local".into(),
+            roles: vec![NodeRole::Controller],
+        };
+        let addresses = resolve_addresses_per_broker(
+            &[operator.clone()],
+            "INTERNAL",
+            &[controller],
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap();
+        assert!(addresses[&0].contains_key(&operator.name));
     }
 
     #[test]

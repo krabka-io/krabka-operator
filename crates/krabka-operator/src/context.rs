@@ -12,11 +12,20 @@ use crate::{
     telemetry::{ControllerMetrics, SharedRegistry},
 };
 
-/// Boxed-dyn admin client handle.
-///
-/// Tests substitute a fake here and open no TCP connection. Production
-/// code wraps a real `AdminClient`.
-pub type AdminClientHandle = Arc<Mutex<dyn AdminClientLike + Send>>;
+/// Boxed-dyn admin client handle. The optional TLS material shares the
+/// handle's lifetime, so cache eviction cannot remove files still used by an
+/// in-flight lazy connection.
+#[derive(Clone)]
+pub struct AdminClientHandle {
+    inner: Arc<Mutex<dyn AdminClientLike + Send>>,
+    _material: Option<Arc<tempfile::TempDir>>,
+}
+
+impl AdminClientHandle {
+    pub(crate) async fn lock(&self) -> tokio::sync::MutexGuard<'_, dyn AdminClientLike + Send> {
+        self.inner.lock().await
+    }
+}
 
 /// Boxed-dyn rebalancer client handle.
 ///
@@ -42,8 +51,6 @@ pub struct Context {
     /// Per-cluster-and-endpoint admin-client cache.
     /// The cache replaces a broken connection at the next use.
     pub admin_clients: Arc<Mutex<HashMap<String, AdminClientHandle>>>,
-    /// Keeps the on-disk TLS material alive for lazily connected admin clients.
-    admin_client_material: Arc<Mutex<HashMap<String, tempfile::TempDir>>>,
     /// Per-endpoint rebalancer-client cache, keyed by the resolved Connect
     /// base URL. The cache drops an entry after a transport failure and
     /// builds it again at the next use.
@@ -65,7 +72,6 @@ impl Context {
             registry,
             metrics,
             admin_clients: Arc::new(Mutex::new(HashMap::new())),
-            admin_client_material: Arc::new(Mutex::new(HashMap::new())),
             rebalancer_clients: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -165,12 +171,12 @@ impl Context {
             },
         )
         .await?;
-        let entry: AdminClientHandle = Arc::new(Mutex::new(admin));
+        let entry = AdminClientHandle {
+            inner: Arc::new(Mutex::new(admin)),
+            _material: Some(Arc::new(material)),
+        };
         map.retain(|cached, _| !cached.starts_with(&prefix));
-        map.insert(key.clone(), entry.clone());
-        let mut materials = self.admin_client_material.lock().await;
-        materials.retain(|cached, _| !cached.starts_with(&prefix));
-        materials.insert(key, material);
+        map.insert(key, entry.clone());
         Ok(entry)
     }
 
@@ -181,8 +187,6 @@ impl Context {
     pub async fn drop_admin_client(&self, cluster: &str) {
         let mut clients = self.admin_clients.lock().await;
         clients.retain(|key, _| key != cluster && !key.starts_with(&format!("{cluster}\0")));
-        let mut materials = self.admin_client_material.lock().await;
-        materials.retain(|key, _| !key.starts_with(&format!("{cluster}\0")));
     }
 
     /// Fills the admin-client cache with a handle from the caller. This is
@@ -195,11 +199,17 @@ impl Context {
     /// There is no `cfg` gate on this function. It stays in the public
     /// API. In production it does no damage and nothing calls it. Without
     /// the gate, the build needs no parallel test-only profile.
-    pub async fn insert_admin_client_for_test(&self, cluster: &str, admin: AdminClientHandle) {
-        self.admin_clients
-            .lock()
-            .await
-            .insert(cluster.to_string(), admin);
+    pub async fn insert_admin_client_for_test<T>(&self, cluster: &str, admin: Arc<Mutex<T>>)
+    where
+        T: AdminClientLike + Send + 'static,
+    {
+        self.admin_clients.lock().await.insert(
+            cluster.to_string(),
+            AdminClientHandle {
+                inner: admin,
+                _material: None,
+            },
+        );
     }
 
     /// Looks up a rebalancer client for `endpoint`, or builds one.

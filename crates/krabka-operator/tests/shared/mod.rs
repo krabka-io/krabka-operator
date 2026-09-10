@@ -485,6 +485,7 @@ pub fn op_config(namespace: &str) -> OperatorConfig {
         client_frame_max: krabka_units::mebibytes(100),
         log_filter: "info".into(),
         default_broker_image: None,
+        default_shell_image: None,
         default_gateway_image: None,
         default_connector_image: None,
         default_schema_registry_image: None,

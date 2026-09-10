@@ -92,7 +92,7 @@ fn broker_0_toml_from_observed(
 /// `authorization: { type: opa, url, superUsers: ["ANONYMOUS"] }` must
 /// give a broker `ConfigMap` whose `broker-0.toml` data field carries the
 /// `[authorization]` block. That block must hold `type = "opa"`,
-/// `super_users = ["ANONYMOUS", "User:CN=krabka-operator"]`, and a nested
+/// `super_users = ["ANONYMOUS", "User:CN=krabka-operator@internal"]`, and a nested
 /// `[authorization.opa]` table with the configured `url`.
 #[tokio::test]
 async fn kafka_with_opa_authorization_renders_correct_broker_toml() {
@@ -120,7 +120,7 @@ async fn kafka_with_opa_authorization_renders_correct_broker_toml() {
     for needle in [
         "[authorization]",
         "type = \"opa\"",
-        "super_users = [\"ANONYMOUS\", \"User:CN=krabka-operator\"]",
+        "super_users = [\"ANONYMOUS\", \"User:CN=krabka-operator@internal\"]",
         "[authorization.opa]",
         "url = \"http://opa:8181/v1/data/k/a\"",
     ] {
@@ -143,7 +143,7 @@ async fn kafka_with_opa_authorization_renders_correct_broker_toml() {
         a.super_users
             == vec![
                 "ANONYMOUS".to_string(),
-                "User:CN=krabka-operator".to_string()
+                "User:CN=krabka-operator@internal".to_string()
             ]
     );
 }
@@ -178,7 +178,7 @@ async fn kafka_with_simple_authorization_super_users_round_trip() {
         ("[authorization]", true),
         ("type = \"simple\"", true),
         (
-            "super_users = [\"User:admin\", \"User:CN=krabka-operator\"]",
+            "super_users = [\"User:admin\", \"User:CN=krabka-operator@internal\"]",
             true,
         ),
         ("[authorization.opa]", false),
@@ -203,7 +203,7 @@ async fn kafka_with_simple_authorization_super_users_round_trip() {
         a.super_users
             == vec![
                 "User:admin".to_string(),
-                "User:CN=krabka-operator".to_string()
+                "User:CN=krabka-operator@internal".to_string()
             ]
     );
 }

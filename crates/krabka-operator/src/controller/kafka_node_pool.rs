@@ -43,6 +43,7 @@ use crate::{
             self, APP_LABEL, BROKER_PORT, DEFAULT_BROKER_IMAGE, ReconcileError, apply_object,
             common_labels, condition, derive_status, owner_ref, parent_version_gate,
         },
+        listeners,
         rebalance::RebalanceState,
     },
     crd::{
@@ -2054,18 +2055,20 @@ async fn operator_bootstrap_address(
     namespace: &str,
 ) -> Result<String, ReconcileError> {
     let service = Api::<Service>::namespaced(ctx.client.clone(), namespace)
-        .get(&format!("{cluster}-broker-headless"))
+        .get_opt(&format!("{cluster}-broker-headless"))
         .await?;
-    let port = service
-        .spec
-        .and_then(|spec| spec.ports)
-        .and_then(|ports| {
-            ports
-                .into_iter()
-                .find(|port| port.name.as_deref() == Some("operator-admin"))
-        })
-        .map(|port| port.port)
-        .ok_or_else(|| ReconcileError::Malformed("operator-admin Service port missing".into()))?;
+    let port = service.map_or(Ok(listeners::OPERATOR_LISTENER_PORT), |service| {
+        service
+            .spec
+            .and_then(|spec| spec.ports)
+            .and_then(|ports| {
+                ports
+                    .into_iter()
+                    .find(|port| port.name.as_deref() == Some("operator-admin"))
+            })
+            .map(|port| port.port)
+            .ok_or_else(|| ReconcileError::Malformed("operator-admin Service port missing".into()))
+    })?;
     Ok(format!(
         "{cluster}-broker-headless.{namespace}.svc.cluster.local:{}",
         port
@@ -2149,6 +2152,18 @@ async fn reconcile_deletion(
         Ok::<(), ReconcileError>(())
     };
 
+    if parent.is_none_or(|parent| parent.meta().deletion_timestamp.is_some()) {
+        scale_down.await?;
+        if !pods.items.is_empty() {
+            return Ok(common::requeue(ctx.config.controller_dependency_requeue));
+        }
+        if observed_roles & 1 != 0 {
+            delete_deletion_rebalance(ctx, namespace, cluster, name).await?;
+        }
+        set_finalizer(pool_api, pool, false).await?;
+        return Ok(Action::await_change());
+    }
+
     if observed_roles & 1 != 0
         && live_replicas > 0
         && let Some(action) = reconcile_broker_drain(BrokerDrainInput {
@@ -2165,18 +2180,6 @@ async fn reconcile_deletion(
         .await?
     {
         return Ok(action);
-    }
-
-    if parent.is_none_or(|parent| parent.meta().deletion_timestamp.is_some()) {
-        scale_down.await?;
-        if !pods.items.is_empty() {
-            return Ok(common::requeue(ctx.config.controller_dependency_requeue));
-        }
-        if observed_roles & 1 != 0 {
-            delete_deletion_rebalance(ctx, namespace, cluster, name).await?;
-        }
-        set_finalizer(pool_api, pool, false).await?;
-        return Ok(Action::await_change());
     }
 
     if observed_roles & 2 != 0 {

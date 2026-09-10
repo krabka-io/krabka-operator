@@ -123,6 +123,9 @@ pub enum ValidationError {
     /// The inter-broker listener is `type: gssapi` but
     /// `spec.interBrokerKerberos` is absent.
     InterBrokerGssapiRequiresKerberosConfig(String),
+    /// A broker-global super-user cannot be safely combined with an external
+    /// authenticator that can assert the same unscoped principal name.
+    OperatorPrincipalMayBeForged(String),
 }
 
 #[allow(dead_code)]
@@ -157,6 +160,7 @@ impl ValidationError {
             Self::InterBrokerGssapiRequiresKerberosConfig(_) => {
                 "InterBrokerGssapiRequiresKerberosConfig"
             }
+            Self::OperatorPrincipalMayBeForged(_) => "OperatorPrincipalMayBeForged",
         }
     }
 
@@ -221,8 +225,34 @@ impl ValidationError {
             Self::InterBrokerGssapiRequiresKerberosConfig(n) => format!(
                 "interBrokerListenerName='{n}' is type=gssapi but spec.interBrokerKerberos is not set"
             ),
+            Self::OperatorPrincipalMayBeForged(n) => format!(
+                "listener '{n}': oauth/gssapi cannot be combined with authorization because broker super-user principals are not listener-scoped"
+            ),
         }
     }
+}
+
+/// Reject external authenticators that can assert the operator's global
+/// super-user name. Managed SCRAM users are separately fenced by the reserved
+/// `KafkaUser` name; OAuth and GSSAPI identities are owned outside Kubernetes.
+pub(crate) fn validate_operator_principal_isolation(
+    listeners: &[Listener],
+    authorization_enabled: bool,
+) -> Result<(), ValidationError> {
+    if !authorization_enabled {
+        return Ok(());
+    }
+    if let Some(listener) = listeners.iter().find(|listener| {
+        matches!(
+            listener.authentication,
+            Some(ListenerAuthentication::OAuth(_) | ListenerAuthentication::Gssapi(_))
+        )
+    }) {
+        return Err(ValidationError::OperatorPrincipalMayBeForged(
+            listener.name.clone(),
+        ));
+    }
+    Ok(())
 }
 
 /// Returns a canonical form of an OAuth listener configuration.
@@ -1639,6 +1669,20 @@ mod tests {
         cfg.jwks_endpoint_uri = Some("http://issuer.example.com/jwks".into());
         let listeners = vec![oauth_listener("oauth", 9095, true, cfg)];
         validate_listeners(&listeners, None).unwrap();
+    }
+
+    #[test]
+    fn authorization_rejects_external_identity_providers() {
+        let oauth = oauth_listener("oauth", 9095, true, oauth_cfg_minimal());
+        assert!(
+            validate_operator_principal_isolation(&[oauth.clone()], false).is_ok(),
+            "without a super-user bypass there is no reserved identity to forge"
+        );
+        let err = validate_operator_principal_isolation(&[oauth], true).unwrap_err();
+        assert!(err.reason() == "OperatorPrincipalMayBeForged");
+
+        let gssapi = gssapi_listener("gssapi", 9096, true, gssapi_cfg_with_service("kafka"));
+        assert!(validate_operator_principal_isolation(&[gssapi], true).is_err());
     }
 
     #[test]
