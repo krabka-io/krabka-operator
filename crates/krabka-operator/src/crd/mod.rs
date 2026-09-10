@@ -36,7 +36,10 @@ pub use listener::*;
 pub use logging::{ConfigMapKeyRef, ExternalLoggingSource, Logging, LoggingType};
 pub use metrics::{MetricsConfig, MetricsType, PodMonitorSpec, ServiceMonitorSpec};
 pub use network_policy::{NetworkPolicyPeer, NetworkPolicySpec};
-pub use rebalance::{KafkaRebalance, KafkaRebalanceSpec, KafkaRebalanceStatus, OptimizationResult};
+pub use rebalance::{
+    KafkaRebalance, KafkaRebalanceMode, KafkaRebalanceSpec, KafkaRebalanceStatus,
+    OptimizationResult, RebalancerAuthorizationSecretRef,
+};
 pub use schema_registry::{
     BasicAuthn, BearerAuthn, BearerMode, CertManagerIssuerRef, KafkaClientSasl, KafkaClientTls,
     SchemaRegistry, SchemaRegistryAuthn, SchemaRegistryAuthz, SchemaRegistryHealthChecks,

@@ -324,7 +324,7 @@ pub fn fake_rebalance_body(name: &str, namespace: &str) -> serde_json::Value {
             "uid": "rebalance-uid",
             "generation": 1,
         },
-        "spec": {},
+        "spec": { "mode": "full" },
         "status": { "conditions": [] }
     })
 }

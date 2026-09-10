@@ -12,6 +12,7 @@
 use std::sync::Mutex as StdMutex;
 
 use krabka_operator::{
+    crd::KafkaRebalanceMode,
     ids::{LeaderMovementCount, MaxLeadersCount, MaxReplicasCount, ReplicaMovementCount},
     rebalancer_client::{
         ProposalStatus, ProposalSummary, RebalancerClientLike, RebalancerError, RebalancerProposal,
@@ -22,11 +23,17 @@ use krabka_units::ByteRate;
 /// One recorded Connect-RPC.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RebalCall {
-    CreateProposal(Vec<String>),
+    CreateProposal {
+        mode: KafkaRebalanceMode,
+        brokers: Vec<i32>,
+        goals: Vec<String>,
+        authenticated: bool,
+    },
     GetProposal(String),
     ExecuteProposal {
         id: String,
         throttle: Option<ByteRate>,
+        authenticated: bool,
     },
     CancelExecution(String),
 }
@@ -129,12 +136,17 @@ pub fn fake_proposal(id: &str, status: ProposalStatus) -> RebalancerProposal {
 impl RebalancerClientLike for FakeRebalancerClient {
     async fn create_proposal(
         &self,
+        mode: KafkaRebalanceMode,
+        brokers: &[i32],
         goals: &[String],
+        bearer_token: Option<&str>,
     ) -> Result<RebalancerProposal, RebalancerError> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(RebalCall::CreateProposal(goals.to_vec()));
+        self.calls.lock().unwrap().push(RebalCall::CreateProposal {
+            mode,
+            brokers: brokers.to_vec(),
+            goals: goals.to_vec(),
+            authenticated: bearer_token.is_some(),
+        });
         Self::serve(&self.create)
     }
 
@@ -150,10 +162,12 @@ impl RebalancerClientLike for FakeRebalancerClient {
         &self,
         id: &str,
         throttle: Option<ByteRate>,
+        bearer_token: Option<&str>,
     ) -> Result<RebalancerProposal, RebalancerError> {
         self.calls.lock().unwrap().push(RebalCall::ExecuteProposal {
             id: id.into(),
             throttle,
+            authenticated: bearer_token.is_some(),
         });
         Self::serve(&self.execute)
     }

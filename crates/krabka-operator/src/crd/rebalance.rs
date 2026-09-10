@@ -19,6 +19,30 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{LeaderMovementCount, MaxLeadersCount, MaxReplicasCount, ReplicaMovementCount};
 
+/// Scope of a rebalancer proposal.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum KafkaRebalanceMode {
+    /// Optimize the complete cluster using the selected goals.
+    #[default]
+    Full,
+    /// Evacuate the explicitly listed brokers.
+    RemoveBrokers,
+    /// Move load onto the explicitly listed brokers.
+    AddBrokers,
+}
+
+/// Same-namespace Secret key containing the bearer token accepted by the
+/// rebalancer for destructive broker evacuation.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RebalancerAuthorizationSecretRef {
+    /// Kubernetes Secret name.
+    pub name: String,
+    /// Key within the Secret's `data` map.
+    pub key: String,
+}
+
 #[derive(CustomResource, Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[kube(
     group = "krabka.io",
@@ -33,6 +57,22 @@ use crate::ids::{LeaderMovementCount, MaxLeadersCount, MaxReplicasCount, Replica
 )]
 #[serde(rename_all = "camelCase")]
 pub struct KafkaRebalanceSpec {
+    /// Proposal scope. The operator always sends this explicitly to the
+    /// rebalancer, including the default `full` mode.
+    #[serde(default)]
+    pub mode: KafkaRebalanceMode,
+
+    /// Broker ids targeted by `removeBrokers` or `addBrokers`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub brokers: Vec<i32>,
+
+    /// Bearer credential for `removeBrokers`, read from a Secret in this
+    /// resource's namespace. When omitted, the operator derives
+    /// `<cluster>-rebalancer-auth` / `token` from the `krabka.io/cluster`
+    /// label. The token is never written to status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_secret_ref: Option<RebalancerAuthorizationSecretRef>,
+
     /// Optimization goals to apply, by name, for example `RackAware` and
     /// `ReplicaDistribution`. When this field is absent or empty, the
     /// rebalancer uses its full default goal registry in priority
@@ -149,6 +189,12 @@ mod tests {
         let kr = KafkaRebalance::new(
             "demo-rebalance",
             KafkaRebalanceSpec {
+                mode: KafkaRebalanceMode::RemoveBrokers,
+                brokers: vec![3, 4],
+                authorization_secret_ref: Some(RebalancerAuthorizationSecretRef {
+                    name: "demo-rebalancer-auth".into(),
+                    key: "token".into(),
+                }),
                 goals: Some(vec!["RackAware".into(), "ReplicaDistribution".into()]),
                 throttle_bytes_per_sec: Some(bytes_per_sec(10_000_000)),
                 endpoint: Some("http://r.kafka.svc:9300".into()),
@@ -157,6 +203,9 @@ mod tests {
         let json = serde_json::to_string(&kr).unwrap();
         for want in [
             "\"goals\":[\"RackAware\"",
+            "\"mode\":\"removeBrokers\"",
+            "\"brokers\":[3,4]",
+            "\"authorizationSecretRef\":{\"name\":\"demo-rebalancer-auth\",\"key\":\"token\"}",
             "\"throttleBytesPerSec\":10000000",
             "\"endpoint\":\"http://r.kafka.svc:9300\"",
         ] {
@@ -171,13 +220,16 @@ mod tests {
         let spec: KafkaRebalanceSpec = serde_json::from_str("{}").unwrap();
         assert!(
             spec == KafkaRebalanceSpec {
+                mode: KafkaRebalanceMode::Full,
+                brokers: vec![],
+                authorization_secret_ref: None,
                 goals: None,
                 throttle_bytes_per_sec: None,
                 endpoint: None,
             }
         );
         let j = serde_json::to_string(&spec).unwrap();
-        assert!(j == "{}", "all-default spec must serialize to empty object");
+        assert!(j == "{\"mode\":\"full\"}", "got: {j}");
     }
 
     #[test]
@@ -204,13 +256,16 @@ mod tests {
             (mebibytes_per_sec(50), "52428800"),
         ] {
             let spec = KafkaRebalanceSpec {
+                mode: KafkaRebalanceMode::Full,
+                brokers: vec![],
+                authorization_secret_ref: None,
                 goals: None,
                 throttle_bytes_per_sec: Some(rate),
                 endpoint: None,
             };
             let json = serde_json::to_string(&spec).unwrap();
             assert!(
-                json == format!("{{\"throttleBytesPerSec\":{encoded}}}"),
+                json == format!("{{\"mode\":\"full\",\"throttleBytesPerSec\":{encoded}}}"),
                 "got: {json}"
             );
             let back: KafkaRebalanceSpec = serde_json::from_str(&json).unwrap();

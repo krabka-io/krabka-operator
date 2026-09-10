@@ -11,7 +11,7 @@
 //! `Ready=False` condition without attempting any further reconcile.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt::Write as _,
     sync::Arc,
 };
@@ -28,7 +28,7 @@ use k8s_openapi::{
 use krabka_units::{convert::TimeExt as _, fmt::Human as _};
 use kube::{
     Resource, ResourceExt as _,
-    api::{Api, ListParams, Patch, PatchParams},
+    api::{Api, DeleteParams, ListParams, Patch, PatchParams},
     runtime::{
         controller::{Action, Controller},
         watcher,
@@ -38,12 +38,17 @@ use serde_json::json;
 
 use crate::{
     context::Context,
-    controller::common::{
-        self, APP_LABEL, BROKER_PORT, DEFAULT_BROKER_IMAGE, ReconcileError, apply_object,
-        common_labels, condition, derive_status, owner_ref, parent_version_gate,
+    controller::{
+        common::{
+            self, APP_LABEL, BROKER_PORT, DEFAULT_BROKER_IMAGE, ReconcileError, apply_object,
+            common_labels, condition, derive_status, owner_ref, parent_version_gate,
+        },
+        rebalance::RebalanceState,
     },
     crd::{
-        JbodVolume, Kafka, KafkaCondition, KafkaNodePool, KafkaNodePoolStatus, NodeRole, Storage,
+        JbodVolume, Kafka, KafkaCondition, KafkaNodePool, KafkaNodePoolStatus, KafkaRebalance,
+        KafkaRebalanceMode, KafkaRebalanceSpec, NodeRole, RebalancerAuthorizationSecretRef,
+        Storage,
     },
 };
 
@@ -57,6 +62,8 @@ const FINALIZER: &str = "krabka.io/kafka-node-pool-finalizer";
 const MAX_NODE_ID: i32 = 999_999;
 const NODE_ID_START_ANNOTATION: &str = "krabka.io/node-id-start";
 const PROCESS_ROLES_ANNOTATION: &str = "krabka.io/process-roles";
+const UNREGISTERED_BROKERS_ANNOTATION: &str = "krabka.io/unregistered-brokers";
+const REBALANCE_COMMAND_ANNOTATION: &str = "krabka.io/rebalance";
 
 /// Validation errors for a `KafkaNodePool`. Each variant maps to a
 /// distinct condition reason; the operator surfaces the variant as
@@ -1993,6 +2000,20 @@ fn quorum_bootstrap_address(cluster: &str, namespace: &str) -> String {
     )
 }
 
+async fn delete_deletion_rebalance(
+    ctx: &Context,
+    namespace: &str,
+    cluster: &str,
+    pool: &str,
+) -> Result<(), ReconcileError> {
+    let api: Api<KafkaRebalance> = Api::namespaced(ctx.client.clone(), namespace);
+    let name = broker_drain_name(cluster, pool, 0);
+    if api.get_opt(&name).await?.is_some() {
+        api.delete(&name, &DeleteParams::default()).await?;
+    }
+    Ok(())
+}
+
 async fn reconcile_deletion(
     pool: &KafkaNodePool,
     parent: Option<&Kafka>,
@@ -2015,16 +2036,12 @@ async fn reconcile_deletion(
             "app.kubernetes.io/instance={cluster},krabka.io/pool={name}"
         )))
         .await?;
-    let observed_replicas = pool
-        .spec
-        .replicas
-        .max(
-            observed_sts
-                .as_ref()
-                .map(observed_statefulset_replicas)
-                .unwrap_or_default(),
-        )
+    let live_replicas = observed_sts
+        .as_ref()
+        .map(observed_statefulset_replicas)
+        .unwrap_or_default()
         .max(observed_pool_pod_replicas(&pods.items, &sts_name));
+    let observed_replicas = pool.spec.replicas.max(live_replicas);
     let observed_identity = observed_sts
         .as_ref()
         .map(observed_statefulset_identity)
@@ -2060,28 +2077,31 @@ async fn reconcile_deletion(
         Ok::<(), ReconcileError>(())
     };
 
-    // Broker assignment reads and UnregisterBroker are not exposed by the
-    // pinned admin client yet. Fail closed: never remove a broker pod or PVC
-    // until the operator can prove its replicas were evacuated.
-    if observed_roles & 1 != 0 && observed_replicas > 0 {
-        patch_status_for_pool(
+    if observed_roles & 1 != 0
+        && live_replicas > 0
+        && let Some(action) = reconcile_broker_drain(BrokerDrainInput {
+            pool,
             pool_api,
+            ctx,
+            namespace,
+            cluster,
             name,
-            condition(
-                "Ready",
-                "False",
-                "BrokerDrainBlocked",
-                "broker deletion is blocked until replica evacuation and UnregisterBroker are supported",
-            ),
-        )
-        .await?;
-        return Ok(common::requeue(ctx.config.controller_dependency_requeue));
+            observed_replicas: live_replicas,
+            desired_replicas: 0,
+            node_id_start: observed_node_id_start,
+        })
+        .await?
+    {
+        return Ok(action);
     }
 
     if parent.is_none_or(|parent| parent.meta().deletion_timestamp.is_some()) {
         scale_down.await?;
         if !pods.items.is_empty() {
             return Ok(common::requeue(ctx.config.controller_dependency_requeue));
+        }
+        if observed_roles & 1 != 0 {
+            delete_deletion_rebalance(ctx, namespace, cluster, name).await?;
         }
         set_finalizer(pool_api, pool, false).await?;
         return Ok(Action::await_change());
@@ -2158,6 +2178,9 @@ async fn reconcile_deletion(
     scale_down.await?;
     if !pods.items.is_empty() {
         return Ok(common::requeue(ctx.config.controller_dependency_requeue));
+    }
+    if observed_roles & 1 != 0 {
+        delete_deletion_rebalance(ctx, namespace, cluster, name).await?;
     }
     set_finalizer(pool_api, pool, false).await?;
     Ok(Action::await_change())
@@ -2285,6 +2308,270 @@ struct ControllerScaleDownInput<'a> {
     name: &'a str,
 }
 
+fn removed_broker_ids(node_id_start: i32, observed: i32, desired: i32) -> Vec<i32> {
+    (node_id_start.saturating_add(desired)..node_id_start.saturating_add(observed)).collect()
+}
+
+fn broker_drain_name(cluster: &str, pool: &str, desired: i32) -> String {
+    format!("{cluster}-{pool}-drain-to-{desired}")
+}
+
+fn recorded_unregistrations(pool: &KafkaNodePool) -> BTreeSet<i32> {
+    pool.annotations()
+        .get(UNREGISTERED_BROKERS_ANNOTATION)
+        .into_iter()
+        .flat_map(|value| value.split(','))
+        .filter_map(|value| value.parse().ok())
+        .collect()
+}
+
+async fn patch_broker_drain_condition(
+    pool_api: &Api<KafkaNodePool>,
+    name: &str,
+    reason: &str,
+    message: impl Into<String>,
+) -> Result<Action, ReconcileError> {
+    let message = message.into();
+    patch_status_for_pool(
+        pool_api,
+        name,
+        condition("Ready", "False", reason, &message),
+    )
+    .await?;
+    Ok(Action::requeue(std::time::Duration::from_secs(1)))
+}
+
+struct BrokerDrainInput<'a> {
+    pool: &'a KafkaNodePool,
+    pool_api: &'a Api<KafkaNodePool>,
+    ctx: &'a Context,
+    namespace: &'a str,
+    cluster: &'a str,
+    name: &'a str,
+    observed_replicas: i32,
+    desired_replicas: i32,
+    node_id_start: i32,
+}
+
+fn managed_drain_matches(
+    rebalance: &KafkaRebalance,
+    brokers: &[i32],
+    authorization: &RebalancerAuthorizationSecretRef,
+) -> bool {
+    rebalance.spec.mode == KafkaRebalanceMode::RemoveBrokers
+        && rebalance.spec.brokers == brokers
+        && rebalance.spec.authorization_secret_ref.as_ref() == Some(authorization)
+}
+
+/// Hold pod removal behind a durable remove-brokers proposal, a fresh
+/// assignment read, and one recorded `UnregisterBroker` call per removed id.
+async fn reconcile_broker_drain(
+    input: BrokerDrainInput<'_>,
+) -> Result<Option<Action>, ReconcileError> {
+    if input.observed_replicas <= input.desired_replicas {
+        return Ok(None);
+    }
+    let brokers = removed_broker_ids(
+        input.node_id_start,
+        input.observed_replicas,
+        input.desired_replicas,
+    );
+    let rebalance_name = broker_drain_name(input.cluster, input.name, input.desired_replicas);
+    let authorization_secret_ref = RebalancerAuthorizationSecretRef {
+        name: format!("{}-rebalancer-auth", input.cluster),
+        key: "token".into(),
+    };
+    let api: Api<KafkaRebalance> = Api::namespaced(input.ctx.client.clone(), input.namespace);
+    let Some(rebalance) = api.get_opt(&rebalance_name).await? else {
+        let mut resource = KafkaRebalance::new(
+            &rebalance_name,
+            KafkaRebalanceSpec {
+                mode: KafkaRebalanceMode::RemoveBrokers,
+                brokers: brokers.clone(),
+                authorization_secret_ref: Some(authorization_secret_ref),
+                ..Default::default()
+            },
+        );
+        resource.metadata.namespace = Some(input.namespace.into());
+        resource.metadata.labels = Some(BTreeMap::from([
+            ("krabka.io/cluster".into(), input.cluster.into()),
+            ("krabka.io/pool".into(), input.name.into()),
+            (
+                "app.kubernetes.io/managed-by".into(),
+                "krabka-operator".into(),
+            ),
+        ]));
+        apply_object(&api, &rebalance_name, &resource).await?;
+        return patch_broker_drain_condition(
+            input.pool_api,
+            input.name,
+            "BrokerDrainInProgress",
+            format!("created remove-brokers proposal for {brokers:?}"),
+        )
+        .await
+        .map(Some);
+    };
+
+    if !managed_drain_matches(&rebalance, &brokers, &authorization_secret_ref) {
+        return patch_broker_drain_condition(
+            input.pool_api,
+            input.name,
+            "BrokerDrainBlocked",
+            "managed remove-brokers proposal does not match the requested drain",
+        )
+        .await
+        .map(Some);
+    }
+
+    match crate::controller::rebalance::current_state(&rebalance) {
+        RebalanceState::ProposalReady => {
+            api.patch(
+                &rebalance_name,
+                &PatchParams::default(),
+                &Patch::Merge(&json!({
+                    "metadata": { "annotations": { (REBALANCE_COMMAND_ANNOTATION): "approve" } }
+                })),
+            )
+            .await?;
+            return patch_broker_drain_condition(
+                input.pool_api,
+                input.name,
+                "BrokerDrainInProgress",
+                format!("approved remove-brokers proposal for {brokers:?}"),
+            )
+            .await
+            .map(Some);
+        }
+        RebalanceState::NotReady | RebalanceState::Stopped => {
+            let message = rebalance
+                .status
+                .as_ref()
+                .and_then(|status| status.conditions.iter().rev().find(|c| c.status == "True"))
+                .map_or_else(
+                    || format!("remove-brokers proposal for {brokers:?} cannot proceed"),
+                    |condition| condition.message.clone(),
+                );
+            return patch_broker_drain_condition(
+                input.pool_api,
+                input.name,
+                "BrokerDrainBlocked",
+                message,
+            )
+            .await
+            .map(Some);
+        }
+        RebalanceState::New | RebalanceState::Rebalancing => {
+            return patch_broker_drain_condition(
+                input.pool_api,
+                input.name,
+                "BrokerDrainInProgress",
+                format!("waiting for remove-brokers proposal for {brokers:?}"),
+            )
+            .await
+            .map(Some);
+        }
+        RebalanceState::Ready => {}
+    }
+
+    if rebalance
+        .status
+        .as_ref()
+        .and_then(|status| status.observed_generation)
+        != rebalance.metadata.generation
+    {
+        return patch_broker_drain_condition(
+            input.pool_api,
+            input.name,
+            "BrokerDrainInProgress",
+            "waiting for the current remove-brokers proposal generation",
+        )
+        .await
+        .map(Some);
+    }
+
+    let bootstrap = quorum_bootstrap_address(input.cluster, input.namespace);
+    let admin = input
+        .ctx
+        .admin_client_for(input.cluster, &bootstrap)
+        .await?;
+    let mut admin = admin.lock().await;
+    let assignments = admin.describe_partition_assignments(&[]).await?;
+    let removed: BTreeSet<i32> = brokers.iter().copied().collect();
+    if let Some(assignment) = assignments
+        .iter()
+        .find(|assignment| assignment.replicas.iter().any(|id| removed.contains(id)))
+    {
+        drop(admin);
+        return patch_broker_drain_condition(
+            input.pool_api,
+            input.name,
+            "BrokerDrainBlocked",
+            format!(
+                "{}-{} still has a replica on removed brokers",
+                assignment.topic, assignment.partition
+            ),
+        )
+        .await
+        .map(Some);
+    }
+    let in_flight = admin
+        .list_partition_reassignments(
+            &BTreeMap::new(),
+            input.ctx.config.rebalancer_request_timeout,
+        )
+        .await?;
+    if in_flight.iter().any(|assignment| {
+        assignment
+            .replicas
+            .iter()
+            .chain(&assignment.adding_replicas)
+            .chain(&assignment.removing_replicas)
+            .any(|id| removed.contains(id))
+    }) {
+        drop(admin);
+        return patch_broker_drain_condition(
+            input.pool_api,
+            input.name,
+            "BrokerDrainBlocked",
+            "a reassignment still references a removed broker",
+        )
+        .await
+        .map(Some);
+    }
+
+    let recorded = recorded_unregistrations(input.pool);
+    if let Some(broker_id) = brokers.iter().find(|id| !recorded.contains(id)) {
+        admin.unregister_broker(*broker_id).await?;
+        drop(admin);
+        let mut updated = recorded;
+        updated.insert(*broker_id);
+        let value = updated
+            .iter()
+            .map(i32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        input
+            .pool_api
+            .patch(
+                input.name,
+                &PatchParams::default(),
+                &Patch::Merge(&json!({
+                    "metadata": { "annotations": { (UNREGISTERED_BROKERS_ANNOTATION): value } }
+                })),
+            )
+            .await?;
+        return patch_broker_drain_condition(
+            input.pool_api,
+            input.name,
+            "BrokerDrainInProgress",
+            format!("unregistered broker {broker_id}"),
+        )
+        .await
+        .map(Some);
+    }
+    Ok(None)
+}
+
 async fn reconcile_controller_scale_down(
     input: ControllerScaleDownInput<'_>,
 ) -> Result<Option<Action>, ReconcileError> {
@@ -2305,26 +2592,26 @@ async fn reconcile_controller_scale_down(
     if observed_replicas <= input.pool.spec.replicas {
         return Ok(None);
     }
-    if observed_roles & 1 != 0 {
-        patch_status_for_pool(
-            input.pool_api,
-            input.name,
-            condition(
-                "Ready",
-                "False",
-                "BrokerDrainBlocked",
-                "broker scale-down is blocked until replica evacuation and UnregisterBroker are supported",
-            ),
-        )
-        .await?;
-        return Ok(Some(common::requeue(
-            input.ctx.config.controller_dependency_requeue,
-        )));
+    let observed_node_id_start = observed_identity.0.unwrap_or(input.pool.spec.node_id_start);
+    if observed_roles & 1 != 0
+        && let Some(action) = reconcile_broker_drain(BrokerDrainInput {
+            pool: input.pool,
+            pool_api: input.pool_api,
+            ctx: input.ctx,
+            namespace: input.namespace,
+            cluster: input.cluster,
+            name: input.name,
+            observed_replicas,
+            desired_replicas: input.pool.spec.replicas,
+            node_id_start: observed_node_id_start,
+        })
+        .await?
+    {
+        return Ok(Some(action));
     }
     if observed_roles & 2 == 0 {
         return Ok(None);
     }
-    let observed_node_id_start = observed_identity.0.unwrap_or(input.pool.spec.node_id_start);
     let first_removed = observed_node_id_start
         .checked_add(input.pool.spec.replicas)
         .ok_or_else(|| ReconcileError::Malformed("controller node-id range overflow".into()))?;

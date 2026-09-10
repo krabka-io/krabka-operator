@@ -27,7 +27,10 @@ use krabka_units::{
 };
 use serde_json::{Value, json};
 
-use crate::ids::{LeaderMovementCount, MaxLeadersCount, MaxReplicasCount, ReplicaMovementCount};
+use crate::{
+    crd::KafkaRebalanceMode,
+    ids::{LeaderMovementCount, MaxLeadersCount, MaxReplicasCount, ReplicaMovementCount},
+};
 
 /// Test seam that follows [`crate::context::AdminClientHandle`].
 ///
@@ -45,7 +48,10 @@ pub trait RebalancerClientLike: Send + Sync {
     /// returns a `Computed` proposal.
     async fn create_proposal(
         &self,
+        mode: KafkaRebalanceMode,
+        brokers: &[i32],
         goals: &[String],
+        bearer_token: Option<&str>,
     ) -> Result<RebalancerProposal, RebalancerError>;
 
     /// `GetProposal` fetches the current state of one proposal by id.
@@ -58,6 +64,7 @@ pub trait RebalancerClientLike: Send + Sync {
         &self,
         id: &str,
         throttle: Option<ByteRate>,
+        bearer_token: Option<&str>,
     ) -> Result<RebalancerProposal, RebalancerError>;
 
     /// `CancelExecution` reverts the pending reassignments and clears the
@@ -273,13 +280,22 @@ impl ConnectRebalancerClient {
 
     /// Sends a Connect unary request with POST and returns the parsed
     /// JSON body.
-    async fn call(&self, method: &str, body: Value) -> Result<Value, RebalancerError> {
+    async fn call(
+        &self,
+        method: &str,
+        body: Value,
+        bearer_token: Option<&str>,
+    ) -> Result<Value, RebalancerError> {
         let url = format!("{}/{SERVICE_PATH}/{method}", self.base_url);
-        let resp = self
+        let mut request = self
             .http
             .post(&url)
             .header("Content-Type", "application/json")
-            .body(serde_json::to_string(&body).expect("request body serializes"))
+            .body(serde_json::to_string(&body).expect("request body serializes"));
+        if let Some(token) = bearer_token {
+            request = request.bearer_auth(token);
+        }
+        let resp = request
             .send()
             .await
             .map_err(|e| RebalancerError::Transport(e.to_string()))?;
@@ -316,23 +332,31 @@ fn connect_error(text: &str, http_status: u16) -> RebalancerError {
     RebalancerError::Rpc { code, message }
 }
 
+fn create_proposal_body(mode: KafkaRebalanceMode, brokers: &[i32], goals: &[String]) -> Value {
+    let mode = match mode {
+        KafkaRebalanceMode::Full => "PROPOSAL_MODE_FULL",
+        KafkaRebalanceMode::RemoveBrokers => "PROPOSAL_MODE_REMOVE_BROKERS",
+        KafkaRebalanceMode::AddBrokers => "PROPOSAL_MODE_ADD_BROKERS",
+    };
+    json!({ "mode": mode, "brokers": brokers, "goals": goals })
+}
+
 #[async_trait::async_trait]
 impl RebalancerClientLike for ConnectRebalancerClient {
     async fn create_proposal(
         &self,
+        mode: KafkaRebalanceMode,
+        brokers: &[i32],
         goals: &[String],
+        bearer_token: Option<&str>,
     ) -> Result<RebalancerProposal, RebalancerError> {
-        let body = if goals.is_empty() {
-            json!({})
-        } else {
-            json!({ "goals": goals })
-        };
-        let v = self.call("CreateProposal", body).await?;
+        let body = create_proposal_body(mode, brokers, goals);
+        let v = self.call("CreateProposal", body, bearer_token).await?;
         Ok(proposal_from_json(&v))
     }
 
     async fn get_proposal(&self, id: &str) -> Result<RebalancerProposal, RebalancerError> {
-        let v = self.call("GetProposal", json!({ "id": id })).await?;
+        let v = self.call("GetProposal", json!({ "id": id }), None).await?;
         Ok(proposal_from_json(&v))
     }
 
@@ -340,15 +364,18 @@ impl RebalancerClientLike for ConnectRebalancerClient {
         &self,
         id: &str,
         throttle: Option<ByteRate>,
+        bearer_token: Option<&str>,
     ) -> Result<RebalancerProposal, RebalancerError> {
         let v = self
-            .call("ExecuteProposal", execute_body(id, throttle))
+            .call("ExecuteProposal", execute_body(id, throttle), bearer_token)
             .await?;
         Ok(proposal_from_json(&v))
     }
 
     async fn cancel_execution(&self, id: &str) -> Result<RebalancerProposal, RebalancerError> {
-        let v = self.call("CancelExecution", json!({ "id": id })).await?;
+        let v = self
+            .call("CancelExecution", json!({ "id": id }), None)
+            .await?;
         Ok(proposal_from_json(&v))
     }
 }
@@ -357,8 +384,21 @@ impl RebalancerClientLike for ConnectRebalancerClient {
 mod tests {
     use assert2::assert;
     use krabka_units::{bytes_per_sec, mebibytes_per_sec, millis, secs};
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     use super::*;
+
+    #[test]
+    fn remove_brokers_request_uses_published_protocol() {
+        assert!(
+            create_proposal_body(KafkaRebalanceMode::RemoveBrokers, &[3, 4], &[])
+                == json!({
+                    "mode": "PROPOSAL_MODE_REMOVE_BROKERS",
+                    "brokers": [3, 4],
+                    "goals": [],
+                })
+        );
+    }
 
     #[test]
     fn status_parses_pbjson_enum_names() {
@@ -553,11 +593,49 @@ mod tests {
 
         let result = tokio::time::timeout(
             core::time::Duration::from_millis(250),
-            client.call("CreateProposal", json!({})),
+            client.call("CreateProposal", json!({}), None),
         )
         .await
         .expect("configured request timeout");
         assert!(matches!(result, Err(RebalancerError::Transport(_))));
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn removal_calls_send_bearer_authorization() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut connection, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 8_192];
+            let read = connection.read(&mut request).await.unwrap();
+            request.truncate(read);
+            let body = r#"{"id":"p","status":"PROPOSAL_STATUS_COMPUTED"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            connection.write_all(response.as_bytes()).await.unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        let client = ConnectRebalancerClient::new(&format!("http://{addr}"), secs(5));
+
+        client
+            .create_proposal(
+                KafkaRebalanceMode::RemoveBrokers,
+                &[3],
+                &[],
+                Some("test-token"),
+            )
+            .await
+            .unwrap();
+
+        let request = server.await.unwrap();
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("\r\nauthorization: bearer test-token\r\n"),
+            "request omitted bearer authorization"
+        );
     }
 }
