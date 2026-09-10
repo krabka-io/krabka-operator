@@ -987,7 +987,9 @@ struct FinalizeKafkaInput<'a> {
     ca_rotation_condition: KafkaCondition,
     version_condition: KafkaCondition,
     logging_condition: KafkaCondition,
+    target_metadata: Option<String>,
     resolved_metadata: Option<String>,
+    finalize_failed: bool,
     finalized_metadata: Option<&'a str>,
 }
 
@@ -1167,7 +1169,7 @@ async fn reconcile_cas(input: CaPhaseInput<'_>) -> Result<CaPhaseResult, Reconci
     // During clients-CA key replacement, include that trust bundle in the
     // roll gate before any user certificate switches to the new signing key.
     // Idle clients-CA renewals remain hot-reload-only.
-    let ca_trust = if clients_ca_outcome.phase == cluster_ca::CaPhase::Idle {
+    let mut ca_trust = if clients_ca_outcome.phase == cluster_ca::CaPhase::Idle {
         cluster_ca_outcome.trust_bundle_pem.clone()
     } else {
         format!(
@@ -1175,6 +1177,19 @@ async fn reconcile_cas(input: CaPhaseInput<'_>) -> Result<CaPhaseResult, Reconci
             cluster_ca_outcome.trust_bundle_pem, clients_ca_outcome.trust_bundle_pem
         )
     };
+    if let Some(secret) = input
+        .secret_api
+        .get_opt(&cluster_ca::broker_keystore_name(name))
+        .await?
+        && let Some(data) = secret.data
+    {
+        for (key, value) in data {
+            if key.ends_with(".crt") {
+                ca_trust.push('\x1E');
+                ca_trust.push_str(&String::from_utf8_lossy(&value.0));
+            }
+        }
+    }
     let cfg_hash =
         common::combined_config_hash(&obj.spec, Some(&ca_trust), explicit_pin, logging_filter);
 
@@ -1623,7 +1638,9 @@ async fn finalize_kafka(input: FinalizeKafkaInput<'_>) -> Result<Action, Reconci
         ca_rotation_condition: ca_rotation_cond,
         version_condition: version_cond,
         logging_condition,
+        target_metadata,
         resolved_metadata,
+        finalize_failed,
         finalized_metadata,
     } = input;
     // Metrics resources: surface a MetricsReady condition regardless of
@@ -1709,6 +1726,41 @@ async fn finalize_kafka(input: FinalizeKafkaInput<'_>) -> Result<Action, Reconci
     );
     let (ready, reason, message) = rollup_condition(&rollup);
     let (rolling, rolling_reason, rolling_message) = rolling_condition_from_rollup(&rollup);
+    let upgrade_condition = match target_metadata.as_deref() {
+        Some(target) if resolved_metadata.as_deref() == Some(target) => condition(
+            "KafkaVersionUpgrade",
+            "True",
+            "Finalized",
+            &format!(
+                "all pools run {} and metadata.version {target} is finalized",
+                obj.spec.kafka_version
+            ),
+        ),
+        Some(target) if finalize_failed => condition(
+            "KafkaVersionUpgrade",
+            "False",
+            "AwaitingFinalize",
+            &format!(
+                "all pools run {}, but metadata.version {target} is not finalized",
+                obj.spec.kafka_version
+            ),
+        ),
+        Some(target) => condition(
+            "KafkaVersionUpgrade",
+            "False",
+            "RollingImages",
+            &format!(
+                "waiting for every pool to run {} before finalizing metadata.version {target}",
+                obj.spec.kafka_version
+            ),
+        ),
+        None => condition(
+            "KafkaVersionUpgrade",
+            "False",
+            "InvalidTarget",
+            "the requested Kafka or metadata version is invalid",
+        ),
+    };
     let mut conditions = vec![
         condition(
             "Ready",
@@ -1730,6 +1782,7 @@ async fn finalize_kafka(input: FinalizeKafkaInput<'_>) -> Result<Action, Reconci
         clients_ca_cond,
         ca_rotation_cond,
         version_cond,
+        upgrade_condition,
         logging_condition,
     ];
     let has_lb_tls_listener = effective_listeners
@@ -1778,6 +1831,7 @@ async fn finalize_kafka(input: FinalizeKafkaInput<'_>) -> Result<Action, Reconci
             trust_anchors: Some(clients_ca_outcome.trust_anchors),
         }),
         kafka_version: Some(obj.spec.kafka_version.clone()),
+        target_metadata_version: target_metadata,
         // Advance the finalized metadata version when valid; hold the
         // previous value on a validation failure.
         metadata_version: resolved_metadata
@@ -1916,13 +1970,14 @@ async fn reconcile_metadata_version(
     port: i32,
     resolved: Option<&str>,
     finalized: Option<&str>,
+    pools_rolled: bool,
     timeout: Time,
 ) -> Result<Option<String>, KafkaCondition> {
     let Some(resolved) = resolved else {
         return Ok(None);
     };
     let Some(finalized) = finalized else {
-        return Ok(Some(resolved.to_string()));
+        return Ok(pools_rolled.then(|| resolved.to_string()));
     };
     let Some(target_level) = metadata_version_level(resolved) else {
         return Ok(None);
@@ -1932,6 +1987,9 @@ async fn reconcile_metadata_version(
     };
     if target_level == finalized_level {
         return Ok(Some(resolved.to_string()));
+    }
+    if !pools_rolled {
+        return Ok(Some(finalized.to_string()));
     }
 
     let bootstrap = format!("{name}-broker-headless.{namespace}.svc.cluster.local:{port}");
@@ -2008,28 +2066,42 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
     let secret_api: Api<Secret> = Api::namespaced(ctx.client.clone(), &ns);
     let _cluster_id = ensure_cluster_id_secret(&secret_api, &obj).await?;
     validate_kafka_runtime(&obj, &ctx, &ns, &name).await?;
+    let pool_api: Api<KafkaNodePool> = Api::namespaced(ctx.client.clone(), &ns);
+    let lp = ListParams::default().labels(&format!("krabka.io/cluster={name}"));
+    let pools = pool_api.list(&lp).await?;
+    let sts_api: Api<StatefulSet> = Api::namespaced(ctx.client.clone(), &ns);
+    let statefulsets = sts_api
+        .list(&ListParams::default().labels(&format!(
+            "app.kubernetes.io/instance={name},app.kubernetes.io/name={}",
+            common::APP_LABEL
+        )))
+        .await?;
     let finalized_metadata = obj
         .status
         .as_ref()
         .and_then(|s| s.metadata_version.as_deref());
     let (version_cond, resolved_metadata) = evaluate_kafka_version(&obj);
+    let target_metadata = resolved_metadata.clone();
     let inter_broker_port = effective_listeners
         .iter()
         .find(|listener| listener.name == inter_broker_name)
         .map_or(common::BROKER_PORT, |listener| listener.port);
-    let (version_cond, resolved_metadata) = match reconcile_metadata_version(
+    let pools_rolled =
+        pools_rolled_to_version(&pools.items, &statefulsets.items, &obj.spec.kafka_version);
+    let (version_cond, resolved_metadata, finalize_failed) = match reconcile_metadata_version(
         &ctx,
         &ns,
         &name,
         inter_broker_port,
         resolved_metadata.as_deref(),
         finalized_metadata,
+        pools_rolled,
         secs(30),
     )
     .await
     {
-        Ok(resolved) => (version_cond, resolved),
-        Err(condition) => (condition, None),
+        Ok(resolved) => (version_cond, resolved, false),
+        Err(condition) => (condition, None, true),
     };
     // Only an explicit, valid pin enters the config hash (a defaulted
     // metadata version rolls via the pod-template image change instead,
@@ -2052,16 +2124,6 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
     // Pool list — needed up front for the CA rotation convergence
     // check (whether the previous rotation step's roll has finished), and
     // reused below for status rollup + owner-ref adoption.
-    let pool_api: Api<KafkaNodePool> = Api::namespaced(ctx.client.clone(), &ns);
-    let lp = ListParams::default().labels(&format!("krabka.io/cluster={name}"));
-    let pools = pool_api.list(&lp).await?;
-    let sts_api: Api<StatefulSet> = Api::namespaced(ctx.client.clone(), &ns);
-    let statefulsets = sts_api
-        .list(&ListParams::default().labels(&format!(
-            "app.kubernetes.io/instance={name},app.kubernetes.io/name={}",
-            common::APP_LABEL
-        )))
-        .await?;
     let topology_pod_api: Api<Pod> = Api::namespaced(ctx.client.clone(), &ns);
     let topology_pods = topology_pod_api
         .list(&ListParams::default().labels(&format!(
@@ -2160,7 +2222,9 @@ async fn reconcile_inner(obj: Arc<Kafka>, ctx: Arc<Context>) -> Result<Action, R
         ca_rotation_condition: ca_rotation_cond,
         version_condition: version_cond,
         logging_condition,
+        target_metadata,
         resolved_metadata,
+        finalize_failed,
         finalized_metadata,
     })
     .await
@@ -2400,6 +2464,23 @@ pub(crate) fn pools_converged<'a, 'b>(
     !any || hashes.len() == 1
 }
 
+fn pools_rolled_to_version(
+    pools: &[KafkaNodePool],
+    statefulsets: &[StatefulSet],
+    version: &str,
+) -> bool {
+    !pools.is_empty()
+        && pools_converged(pools, statefulsets)
+        && statefulsets.iter().all(|statefulset| {
+            statefulset
+                .metadata
+                .labels
+                .as_ref()
+                .and_then(|labels| labels.get("app.kubernetes.io/version"))
+                .is_some_and(|observed| observed == version)
+        })
+}
+
 /// Removes the one-shot rotation-trigger annotations from the `Kafka` CR.
 ///
 /// A JSON Merge Patch with `null` values deletes the keys.
@@ -2557,6 +2638,7 @@ mod tests {
         statefulset.metadata.labels = Some(BTreeMap::from([
             ("app.kubernetes.io/instance".into(), "demo".into()),
             ("app.kubernetes.io/name".into(), common::APP_LABEL.into()),
+            ("app.kubernetes.io/version".into(), "0.4.0".into()),
             ("krabka.io/pool".into(), "controllers".into()),
         ]));
         statefulset.spec = Some(
@@ -2597,6 +2679,16 @@ mod tests {
 
         statefulset.status.as_mut().unwrap().current_revision = Some("revision-2".into());
         assert!(pools_converged([&p], [&statefulset]));
+        assert!(pools_rolled_to_version(
+            std::slice::from_ref(&p),
+            std::slice::from_ref(&statefulset),
+            "0.4.0"
+        ));
+        assert!(!pools_rolled_to_version(
+            std::slice::from_ref(&p),
+            std::slice::from_ref(&statefulset),
+            "0.5.0"
+        ));
 
         statefulset.spec.as_mut().unwrap().replicas = Some(2);
         assert!(!pools_converged([&p], [&statefulset]));

@@ -991,6 +991,13 @@ pub(crate) async fn ensure_broker_keystore(
             .as_ref()
             .map_or(365, |c| c.validity_days),
     );
+    let renewal = days(
+        kafka
+            .spec
+            .cluster_ca
+            .as_ref()
+            .map_or(30, |ca| ca.renewal_days),
+    );
 
     let existing = secret_api.get_opt(&name).await?;
     let mut data: BTreeMap<String, ByteString> = existing
@@ -1015,9 +1022,16 @@ pub(crate) async fn ensure_broker_keystore(
                 .ok()
                 .map(std::borrow::ToOwned::to_owned)
         });
+        let expiring = match data.get(&crt_key) {
+            Some(cert) => std::str::from_utf8(&cert.0).map_or(Ok(true), |pem| {
+                renew_if_expiring(pem, renewal, OffsetDateTime::now_utc())
+            })?,
+            None => true,
+        };
 
         let needs_reissue = force_reissue
             || !has_cert
+            || expiring
             || stored_digest.is_none()
             || stored_digest.as_deref() != Some(&requested_digest);
 

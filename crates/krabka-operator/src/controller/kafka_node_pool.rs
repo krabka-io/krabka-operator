@@ -21,10 +21,11 @@ use k8s_openapi::{
     api::{
         apps::v1::StatefulSet,
         core::v1::{PersistentVolumeClaim, Pod, PodSpec, ResourceRequirements, Secret},
+        policy::v1::PodDisruptionBudget,
     },
     apimachinery::pkg::api::resource::Quantity,
 };
-use krabka_units::fmt::Human as _;
+use krabka_units::{convert::TimeExt as _, fmt::Human as _};
 use kube::{
     Resource, ResourceExt as _,
     api::{Api, ListParams, Patch, PatchParams},
@@ -1516,6 +1517,12 @@ pub(crate) fn render_statefulset(
         "initContainers": [init],
         "containers": [main],
         "volumes": [{ "name": "data", "emptyDir": {} }],
+        "terminationGracePeriodSeconds": parent
+            .spec
+            .broker_tuning
+            .as_ref()
+            .and_then(|tuning| tuning.controlled_shutdown_drain_timeout)
+            .map_or(60, |timeout| timeout.secs_i64().saturating_add(30)),
     });
     if pool.spec.roles.contains(&NodeRole::Controller) {
         pod_spec["topologySpreadConstraints"] = json!([{
@@ -1593,7 +1600,8 @@ pub(crate) fn render_statefulset(
     let mut sts_spec = json!({
         "serviceName": service_name,
         "replicas": pool.spec.replicas,
-        "podManagementPolicy": "Parallel",
+        "podManagementPolicy": "OrderedReady",
+        "updateStrategy": { "type": "RollingUpdate" },
         "selector": { "matchLabels": selector },
         "template": {
             "metadata": template_meta,
@@ -1621,6 +1629,31 @@ pub(crate) fn render_statefulset(
         "spec": sts_spec,
     }))?;
     Ok(sts)
+}
+
+fn render_pod_disruption_budget(
+    pool: &KafkaNodePool,
+    namespace: &str,
+    cluster: &str,
+) -> Result<PodDisruptionBudget, ReconcileError> {
+    let name = format!("{cluster}-{}", pool.name_any());
+    Ok(serde_json::from_value(json!({
+        "apiVersion": "policy/v1",
+        "kind": "PodDisruptionBudget",
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "ownerReferences": [owner_ref::<KafkaNodePool>(pool)?],
+        },
+        "spec": {
+            "maxUnavailable": 1,
+            "selector": { "matchLabels": {
+                "app.kubernetes.io/instance": cluster,
+                "app.kubernetes.io/name": APP_LABEL,
+                "krabka.io/pool": pool.name_any(),
+            }},
+        },
+    }))?)
 }
 
 fn default_resources() -> ResourceRequirements {
@@ -2027,6 +2060,24 @@ async fn reconcile_deletion(
         Ok::<(), ReconcileError>(())
     };
 
+    // Broker assignment reads and UnregisterBroker are not exposed by the
+    // pinned admin client yet. Fail closed: never remove a broker pod or PVC
+    // until the operator can prove its replicas were evacuated.
+    if observed_roles & 1 != 0 && observed_replicas > 0 {
+        patch_status_for_pool(
+            pool_api,
+            name,
+            condition(
+                "Ready",
+                "False",
+                "BrokerDrainBlocked",
+                "broker deletion is blocked until replica evacuation and UnregisterBroker are supported",
+            ),
+        )
+        .await?;
+        return Ok(common::requeue(ctx.config.controller_dependency_requeue));
+    }
+
     if parent.is_none_or(|parent| parent.meta().deletion_timestamp.is_some()) {
         scale_down.await?;
         if !pods.items.is_empty() {
@@ -2182,8 +2233,10 @@ fn version_gate(parent: &Kafka) -> VersionGate {
 pub async fn run(ctx: Context) -> anyhow::Result<()> {
     let api: Api<KafkaNodePool> = Api::all(ctx.client.clone());
     let sts_api: Api<StatefulSet> = Api::all(ctx.client.clone());
+    let pdb_api: Api<PodDisruptionBudget> = Api::all(ctx.client.clone());
     Controller::new(api, watcher::Config::default())
         .owns(sts_api, watcher::Config::default())
+        .owns(pdb_api, watcher::Config::default())
         .run(reconcile, error_policy, Arc::new(ctx))
         .for_each(|res| async move {
             match res {
@@ -2249,7 +2302,26 @@ async fn reconcile_controller_scale_down(
     let observed_roles = observed_identity
         .1
         .unwrap_or_else(|| role_mask(&input.pool.spec.roles));
-    if observed_roles & 2 == 0 || observed_replicas <= input.pool.spec.replicas {
+    if observed_replicas <= input.pool.spec.replicas {
+        return Ok(None);
+    }
+    if observed_roles & 1 != 0 {
+        patch_status_for_pool(
+            input.pool_api,
+            input.name,
+            condition(
+                "Ready",
+                "False",
+                "BrokerDrainBlocked",
+                "broker scale-down is blocked until replica evacuation and UnregisterBroker are supported",
+            ),
+        )
+        .await?;
+        return Ok(Some(common::requeue(
+            input.ctx.config.controller_dependency_requeue,
+        )));
+    }
+    if observed_roles & 2 == 0 {
         return Ok(None);
     }
     let observed_node_id_start = observed_identity.0.unwrap_or(input.pool.spec.node_id_start);
@@ -2564,6 +2636,11 @@ async fn reconcile_inner(
     // 5. Render + apply the StatefulSet.
     let sts = render_statefulset(&parent, &pool, &image)?;
     apply_object(&sts_api, &sts_name, &sts).await?;
+    if pool.spec.roles.contains(&NodeRole::Broker) {
+        let pdb_api: Api<PodDisruptionBudget> = Api::namespaced(ctx.client.clone(), &ns);
+        let pdb = render_pod_disruption_budget(&pool, &ns, &kafka_name)?;
+        apply_object(&pdb_api, &sts_name, &pdb).await?;
+    }
 
     // 6. Read back live state and patch status.
     let live = sts_api.get_opt(&sts_name).await?;
@@ -2942,6 +3019,42 @@ mod tests {
             "startupProbe needs a generous failureThreshold for a slow KRaft rejoin, got {:?}",
             startup.failure_threshold
         );
+    }
+
+    #[test]
+    fn broker_pool_renders_one_at_a_time_disruption_policy() {
+        let mut parent = parent_fixture("demo");
+        parent.spec.broker_tuning = Some(crate::crd::BrokerTuning {
+            controlled_shutdown_drain_timeout: Some(krabka_units::secs(45)),
+            ..Default::default()
+        });
+        let pool = pool_fixture("brokers", "demo", 3);
+        let statefulset = render_statefulset(&parent, &pool, "img:1").unwrap();
+        let spec = statefulset.spec.unwrap();
+        assert!(spec.pod_management_policy.as_deref() == Some("OrderedReady"));
+        assert!(spec.update_strategy.unwrap().type_.as_deref() == Some("RollingUpdate"));
+        assert!(spec.template.spec.unwrap().termination_grace_period_seconds == Some(75));
+
+        let actual = render_pod_disruption_budget(&pool, "default", "demo").unwrap();
+        let expected: PodDisruptionBudget = serde_json::from_value(json!({
+            "apiVersion": "policy/v1",
+            "kind": "PodDisruptionBudget",
+            "metadata": {
+                "name": "demo-brokers",
+                "namespace": "default",
+                "ownerReferences": [owner_ref::<KafkaNodePool>(&pool).unwrap()],
+            },
+            "spec": {
+                "maxUnavailable": 1,
+                "selector": { "matchLabels": {
+                    "app.kubernetes.io/instance": "demo",
+                    "app.kubernetes.io/name": APP_LABEL,
+                    "krabka.io/pool": "brokers",
+                }},
+            },
+        }))
+        .unwrap();
+        assert!(actual == expected);
     }
 
     #[test]
@@ -5341,6 +5454,7 @@ mod tests {
         }
         parent.status = Some(crate::crd::KafkaStatus {
             conditions,
+            kafka_version: Some(parent.spec.kafka_version.clone()),
             metadata_version: finalized_metadata.map(str::to_string),
             ..Default::default()
         });
@@ -5405,15 +5519,14 @@ mod tests {
     }
 
     #[test]
-    fn version_gate_clears_when_metadata_version_finalized() {
-        // An already-running cluster carries a finalized status.metadataVersion
-        // even if a later spec edit flips KafkaVersionValid=False. We must not
-        // tear the cluster down — the finalized version means a prior reconcile
-        // formatted the pods at a known-good version.
+    fn version_gate_blocks_when_a_later_version_verdict_is_invalid() {
+        // A finalized metadata version proves the old rollout was valid, not
+        // that a later spec edit is safe. Keep the existing StatefulSet in
+        // place, but do not render a new pod template from the rejected spec.
         let parent = parent_with_version_status("demo", Some(false), Some("3.7"));
-        assert!(
-            matches!(version_gate(&parent), VersionGate::Cleared),
-            "a finalized metadata version keeps a running cluster's pods"
-        );
+        let VersionGate::Blocked(condition) = version_gate(&parent) else {
+            panic!("an invalid version verdict must block a new pod template");
+        };
+        check!(condition.reason == "KafkaVersionInvalid");
     }
 }

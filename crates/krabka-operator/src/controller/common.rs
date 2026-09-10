@@ -208,15 +208,17 @@ pub(crate) enum ParentVersionGate<'a> {
     Waiting,
 }
 
-/// Shared parent-Kafka version gate. Clears when the parent has either
-/// `KafkaVersionValid=True` or a finalized `status.metadataVersion`.
+/// Shared parent-Kafka version gate. Clears only after the parent validates
+/// the desired version. A previously finalized level must not override a new
+/// invalid target.
 pub(crate) fn parent_version_gate(parent: &Kafka) -> ParentVersionGate<'_> {
     let status = parent.status.as_ref();
     let version_cond =
         status.and_then(|s| s.conditions.iter().find(|c| c.type_ == "KafkaVersionValid"));
-    let finalized = status.and_then(|s| s.metadata_version.as_deref());
-
-    if finalized.is_some() || version_cond.is_some_and(|c| c.status == "True") {
+    let target_matches = status
+        .and_then(|s| s.kafka_version.as_deref())
+        .is_some_and(|target| target == parent.spec.kafka_version);
+    if target_matches && version_cond.is_some_and(|c| c.status == "True") {
         return ParentVersionGate::Cleared;
     }
 
@@ -932,8 +934,8 @@ pub fn config_hash(content: &str) -> String {
 /// and do not need a roll.
 ///
 /// `cluster_ca_cert_pem` — when `Some`, the cluster CA cert PEM is
-/// included as a fourth segment. Rotating the cluster CA forces a
-/// cluster roll; leaf renewal does not (hot-reload handles it).
+/// included as a fourth segment. The caller appends broker leaf certificates,
+/// so either CA rotation or leaf renewal forces an availability-gated roll.
 ///
 /// `metadata_version_pin` — when `Some`, an *explicit*
 /// `spec.metadataVersion` pin is included as a fifth segment, so changing
