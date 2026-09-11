@@ -252,7 +252,13 @@ pub(crate) fn enumerate_nodes(
     sorted.sort_by_key(|p| p.name_any());
     for pool in sorted {
         let pool_name = pool.name_any();
-        for ordinal in 0..pool.spec.replicas {
+        let replicas = pool
+            .status
+            .as_ref()
+            .and_then(|status| status.replicas)
+            .unwrap_or_default()
+            .max(pool.spec.replicas);
+        for ordinal in 0..replicas {
             let Some(broker_id) = pool.spec.node_id_start.checked_add(ordinal) else {
                 continue;
             };
@@ -2622,6 +2628,19 @@ mod tests {
                     ),
                 ]
         );
+    }
+
+    #[test]
+    fn enumerate_nodes_preserves_observed_nodes_during_scale_down() {
+        let mut brokers = pool_with_status("brokers", 4, 4);
+        brokers.spec.replicas = 3;
+
+        let ids: Vec<_> = enumerate_nodes("demo", "ns", &[brokers])
+            .into_iter()
+            .map(|node| node.broker_id)
+            .collect();
+
+        assert!(ids == vec![0, 1, 2, 3]);
     }
 
     #[test]

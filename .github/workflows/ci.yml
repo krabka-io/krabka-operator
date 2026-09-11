@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  packages: write
   # The Aspect CLI uploads test logs and BEP through the Actions artifact
   # API, which GitHub gates behind an OIDC token it only mints for jobs
   # holding this. Without it those uploads are skipped and the run says so
@@ -26,6 +27,11 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: krabka-io/krabka-rebalancer
+          ref: f932eab4004349417806eefec738ef0b20ad26f4
+          path: .m20/rebalancer
       - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
         with:
           aspect-api-token: ${{ secrets.ASPECT_API_TOKEN }}
@@ -37,7 +43,19 @@ jobs:
           install_only: true
       - run: docker build --tag krabka-operator:e2e --file packaging/Dockerfile .
       - run: >-
-          bazel test --config=docker //:kind_lifecycle_test --test_env=EVIDENCE_DIR=${RUNNER_TEMP}/operator-evidence --test_output=streamed
+          bazel test --config=docker //:kind_lifecycle_test --test_env=EVIDENCE_DIR=${RUNNER_TEMP}/operator-evidence --test_env=BROKER_IMAGE=ghcr.io/krabka-io/krabka-broker@sha256:82744b30f968b53c85545a6208aa4745e2acc12244344d0be6d84b953d61dcb0 --test_env=BROKER_REVISION=986cf6693eebf820c9088e4687a26e1934f50b9b --test_env=REBALANCER_IMAGE=ghcr.io/krabka-io/krabka-rebalancer@sha256:706b3b51a521d97d4166d98a1f39e045b5dfa1508b155bce174161c4bc009b11 --test_env=REBALANCER_REVISION=f932eab4004349417806eefec738ef0b20ad26f4 --test_env=REBALANCER_CHART=${GITHUB_WORKSPACE}/.m20/rebalancer/charts/crabka-rebalancer --test_env=OPERATOR_REVISION=${GITHUB_SHA} --test_output=streamed
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: publish tested operator image
+        if: github.event_name == 'push'
+        run: |
+          image="ghcr.io/krabka-io/krabka-operator:${GITHUB_SHA}"
+          docker tag krabka-operator:e2e "${image}"
+          docker push "${image}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

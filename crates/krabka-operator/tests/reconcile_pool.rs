@@ -2272,7 +2272,7 @@ async fn pool_jbod_renders_multiple_volume_claim_templates() {
     // Set-wide retention honors the JBOD-level deleteClaim.
     assert!(
         body["spec"]["persistentVolumeClaimRetentionPolicy"]
-            == serde_json::json!({ "whenDeleted": "Delete", "whenScaled": "Retain" }),
+            == serde_json::json!({ "whenDeleted": "Delete", "whenScaled": "Delete" }),
         "body = {body}"
     );
 

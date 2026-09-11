@@ -247,7 +247,7 @@ pub struct ConnectRebalancerClient {
     http: reqwest::Client,
 }
 
-const SERVICE_PATH: &str = "krabka.rebalancer.v1.Rebalancer";
+const SERVICE_PATH: &str = "crabka.rebalancer.v1.Rebalancer";
 
 /// Body of an `ExecuteProposal` request.
 ///
@@ -631,6 +631,10 @@ mod tests {
             .unwrap();
 
         let request = server.await.unwrap();
+        assert!(
+            request.starts_with("POST /crabka.rebalancer.v1.Rebalancer/CreateProposal "),
+            "request used the wrong Connect service path"
+        );
         assert!(
             request
                 .to_ascii_lowercase()
