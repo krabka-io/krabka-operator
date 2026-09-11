@@ -714,6 +714,35 @@ fn preserve_live_pod_management_policy(desired: &mut StatefulSet, live: Option<&
     }
 }
 
+fn preserve_live_volume_claim_template_metadata(
+    desired: &mut StatefulSet,
+    live: Option<&StatefulSet>,
+) {
+    let Some(live_claims) = live
+        .and_then(|sts| sts.spec.as_ref())
+        .and_then(|spec| spec.volume_claim_templates.as_ref())
+    else {
+        return;
+    };
+    let Some(desired_claims) = desired
+        .spec
+        .as_mut()
+        .and_then(|spec| spec.volume_claim_templates.as_mut())
+    else {
+        return;
+    };
+    for desired_claim in desired_claims {
+        let Some(live_claim) = live_claims
+            .iter()
+            .find(|claim| claim.metadata.name == desired_claim.metadata.name)
+        else {
+            continue;
+        };
+        desired_claim.metadata.labels = live_claim.metadata.labels.clone();
+        desired_claim.metadata.annotations = live_claim.metadata.annotations.clone();
+    }
+}
+
 #[derive(Clone, Copy)]
 struct BrokerContainerSpec<'a> {
     broker_image: &'a str,
@@ -1334,7 +1363,7 @@ fn render_pvc_retention_policy(
     };
     Some(json!({
         "whenDeleted": if delete_claim { "Delete" } else { "Retain" },
-        "whenScaled": "Retain",
+        "whenScaled": if delete_claim { "Delete" } else { "Retain" },
     }))
 }
 
@@ -2374,6 +2403,7 @@ pub async fn reconcile(
 
 struct ControllerScaleDownInput<'a> {
     pool: &'a KafkaNodePool,
+    sibling_pools: &'a [KafkaNodePool],
     observed: Option<&'a StatefulSet>,
     secret_api: &'a Api<Secret>,
     pool_api: &'a Api<KafkaNodePool>,
@@ -2381,6 +2411,31 @@ struct ControllerScaleDownInput<'a> {
     namespace: &'a str,
     cluster: &'a str,
     name: &'a str,
+}
+
+fn operator_admin_address_for_node(
+    bootstrap: &str,
+    pools: &[KafkaNodePool],
+    current_pool: &str,
+    current_start: i32,
+    current_replicas: i32,
+    node_id: i32,
+) -> Option<String> {
+    let service = bootstrap.rsplit_once(':')?.0.split('.').next()?;
+    let cluster = service.strip_suffix("-broker-headless")?;
+    let (pool, start, replicas) = pools.iter().find_map(|pool| {
+        let name = pool.name_any();
+        let (start, replicas) = if name == current_pool {
+            (current_start, current_replicas)
+        } else {
+            (pool.spec.node_id_start, pool.spec.replicas)
+        };
+        (node_id >= start && node_id < start.saturating_add(replicas))
+            .then_some((name, start, replicas))
+    })?;
+    let ordinal = node_id.checked_sub(start)?;
+    debug_assert!(ordinal < replicas);
+    Some(format!("{cluster}-{pool}-{ordinal}.{bootstrap}"))
 }
 
 fn removed_broker_ids(node_id_start: i32, observed: i32, desired: i32) -> Vec<i32> {
@@ -2731,10 +2786,30 @@ async fn reconcile_controller_scale_down(
             input.ctx.config.controller_dependency_requeue,
         )));
     }
-    admin
-        .remove_raft_voter(cluster_id, target.node_id, target.directory_id)
-        .await?;
+    let leader_address = operator_admin_address_for_node(
+        &address,
+        input.sibling_pools,
+        input.name,
+        observed_node_id_start,
+        observed_replicas,
+        quorum.leader_id,
+    )
+    .unwrap_or(address);
     drop(admin);
+    let leader_admin = input
+        .ctx
+        .admin_client_for(input.namespace, input.cluster, &leader_address)
+        .await?;
+    let mut leader_admin = leader_admin.lock().await;
+    if let Err(error) = leader_admin
+        .remove_raft_voter(cluster_id, target.node_id, target.directory_id)
+        .await
+    {
+        drop(leader_admin);
+        input.ctx.drop_admin_client(input.cluster).await;
+        return Err(error.into());
+    }
+    drop(leader_admin);
     patch_status_for_pool(
         input.pool_api,
         input.name,
@@ -3089,6 +3164,7 @@ async fn reconcile_inner(
 
     if let Some(action) = reconcile_controller_scale_down(ControllerScaleDownInput {
         pool: &pool,
+        sibling_pools: &siblings.items,
         observed: observed_sts.as_ref(),
         secret_api: &secret_api,
         pool_api: &pool_api,
@@ -3112,6 +3188,7 @@ async fn reconcile_inner(
     // podManagementPolicy is immutable. New multi-controller pools need
     // Parallel startup, while existing pools must retain their live value.
     preserve_live_pod_management_policy(&mut sts, observed_sts.as_ref());
+    preserve_live_volume_claim_template_metadata(&mut sts, observed_sts.as_ref());
     apply_object(&sts_api, &sts_name, &sts).await?;
     if pool.spec.roles.contains(&NodeRole::Broker) {
         let pdb_api: Api<PodDisruptionBudget> = Api::namespaced(ctx.client.clone(), &ns);
@@ -3220,6 +3297,27 @@ mod tests {
         labels.insert("krabka.io/cluster".into(), parent.to_string());
         p.metadata.labels = Some(labels);
         p
+    }
+
+    #[test]
+    fn controller_admin_address_targets_the_quorum_leader_pod() {
+        let current = pool_fixture("combined", "demo", 3);
+        let mut sibling = pool_fixture("controllers", "demo", 2);
+        sibling.spec.node_id_start = 10;
+        let pools = [current, sibling];
+        let bootstrap = "demo-broker-headless.default.svc.cluster.local:9091";
+
+        assert!(
+            operator_admin_address_for_node(bootstrap, &pools, "combined", 0, 4, 3,).as_deref()
+                == Some("demo-combined-3.demo-broker-headless.default.svc.cluster.local:9091")
+        );
+        assert!(
+            operator_admin_address_for_node(bootstrap, &pools, "combined", 0, 4, 11,).as_deref()
+                == Some("demo-controllers-1.demo-broker-headless.default.svc.cluster.local:9091")
+        );
+        assert!(
+            operator_admin_address_for_node(bootstrap, &pools, "combined", 0, 4, 99,).is_none()
+        );
     }
 
     #[test]
@@ -3598,6 +3696,47 @@ mod tests {
         preserve_live_pod_management_policy(&mut desired, Some(&live));
 
         assert!(desired.spec.unwrap().pod_management_policy.as_deref() == Some("OrderedReady"));
+    }
+
+    #[test]
+    fn existing_statefulset_retains_volume_claim_template_metadata() {
+        let mut pool = pool_fixture("brokers", "demo", 3);
+        pool.spec.storage = Some(Storage::PersistentClaim(PersistentClaimSpec {
+            size: "1Gi".into(),
+            class: None,
+            delete_claim: false,
+        }));
+        let mut desired = render_statefulset(&parent_fixture("demo"), &pool, "img:2").unwrap();
+        let mut live = desired.clone();
+        let (live_labels, live_annotations) = {
+            let live_claim = &mut live
+                .spec
+                .as_mut()
+                .unwrap()
+                .volume_claim_templates
+                .as_mut()
+                .unwrap()[0];
+            live_claim
+                .metadata
+                .labels
+                .as_mut()
+                .unwrap()
+                .insert("app.kubernetes.io/version".into(), "3.9.0".into());
+            live_claim.metadata.annotations = Some(BTreeMap::from([(
+                "storage.example/defaulted".into(),
+                "true".into(),
+            )]));
+            (
+                live_claim.metadata.labels.clone(),
+                live_claim.metadata.annotations.clone(),
+            )
+        };
+
+        preserve_live_volume_claim_template_metadata(&mut desired, Some(&live));
+
+        let desired_claim = &desired.spec.unwrap().volume_claim_templates.unwrap()[0];
+        assert!(desired_claim.metadata.labels == live_labels);
+        assert!(desired_claim.metadata.annotations == live_annotations);
     }
 
     #[test]
@@ -4140,7 +4279,7 @@ mod tests {
             .persistent_volume_claim_retention_policy
             .unwrap();
         assert!(policy.when_deleted.as_deref() == Some("Delete"));
-        assert!(policy.when_scaled.as_deref() == Some("Retain"));
+        assert!(policy.when_scaled.as_deref() == Some("Delete"));
     }
 
     #[test]
@@ -4454,7 +4593,7 @@ mod tests {
             .persistent_volume_claim_retention_policy
             .unwrap();
         assert!(policy.when_deleted.as_deref() == Some("Delete"));
-        assert!(policy.when_scaled.as_deref() == Some("Retain"));
+        assert!(policy.when_scaled.as_deref() == Some("Delete"));
     }
 
     #[test]
@@ -5844,7 +5983,7 @@ mod tests {
             policy.when_deleted.as_deref() == Some("Delete"),
             "delete_claim=true should map to whenDeleted=Delete"
         );
-        assert!(policy.when_scaled.as_deref() == Some("Retain"));
+        assert!(policy.when_scaled.as_deref() == Some("Delete"));
     }
 
     #[test]
