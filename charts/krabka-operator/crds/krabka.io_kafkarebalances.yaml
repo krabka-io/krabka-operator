@@ -38,7 +38,6 @@ spec:
                 - name
                 type: object
               brokers:
-                default: []
                 description: Broker ids targeted by `removeBrokers` or `addBrokers`.
                 items:
                   format: int32
