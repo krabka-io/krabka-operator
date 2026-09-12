@@ -22,16 +22,23 @@ All in group `krabka.io`, version `v1alpha1`:
 | `KafkaClusterCa` | The cluster CA and its renewal policy |
 | `KafkaLogging`, `KafkaMetrics`, `KafkaNetworkPolicy` | Cross-cutting policy |
 
-Render them with:
+The manifests live in
+[`charts/krabka-operator/crds`](charts/krabka-operator/crds), one
+`krabka.io_<plural>.yaml` per kind. Regenerate them from the Rust types with:
 
 ```bash
-bazel run //:krabka-operator -- gen-crds ./target/crds
+tools/regen-crds.sh
 ```
+
+CI runs the same script and fails when the working tree changes, so a change to
+a CRD type has to reach the manifests in the same commit.
 
 ## Chart
 
 [`charts/krabka-operator`](charts/krabka-operator) installs the operator, its
-RBAC, and the CRDs.
+RBAC, and the CRDs. Helm creates the files in `crds/` on install. It does not
+touch them on upgrade, so a schema change needs a `kubectl apply` of that
+directory.
 
 ## Scope
 
@@ -40,6 +47,12 @@ here: its controllers reached about 21k lines of storage engine across
 `gres-substrate`, `pgexec`, `pgkv` and `gres-ranges`, none of which have been
 extracted, and it is under active development. It returns once those crates
 land in the organisation.
+
+The `Gres` and `GresTenant` manifests still ship in `charts/krabka-operator/crds`,
+because the operator owns every CRD in the `krabka.io` group. This operator does
+not reconcile those two kinds and has no Rust type for either, so
+`tools/regen-crds.sh` leaves them untouched and the drift job does not cover
+them. They come back under the generator with the Gres controllers.
 
 ## Layering
 

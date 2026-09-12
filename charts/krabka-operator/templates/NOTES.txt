@@ -2,9 +2,11 @@ krabka-operator is installed.
 
 The operator is watching {{ if .Values.watchNamespaces }}namespaces: {{ join "," .Values.watchNamespaces }}{{ else }}all namespaces (cluster-scoped){{ end }}.
 
-Install the CRDs separately (operator does not self-install):
+This chart installed the CRDs from its own crds/ directory. Helm creates them
+on install and leaves them alone on upgrade. Apply them by hand after a chart
+upgrade that changes a schema:
 
-  kubectl apply -f https://raw.githubusercontent.com/robot-head/crabka/main/deploy/crds/krabka.io_kafkas.yaml
+  kubectl apply -f charts/krabka-operator/crds
 
 Create a placeholder cluster:
 
