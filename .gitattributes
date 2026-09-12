@@ -9,6 +9,9 @@
 *.yml      text eol=lf
 *.yaml     text eol=lf
 charts/**/templates/*.yaml text eol=lf rules-lint-ignored
+# The CRD manifests are generator output. yamlfmt and the generator disagree
+# on sequence indentation, so a formatted manifest is a drifted manifest.
+charts/**/crds/*.yaml text eol=lf rules-lint-ignored
 *.sh       text eol=lf
 gradlew    text eol=lf
 
