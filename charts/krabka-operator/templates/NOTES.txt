@@ -3,10 +3,14 @@ krabka-operator is installed.
 The operator is watching {{ if .Values.watchNamespaces }}namespaces: {{ join "," .Values.watchNamespaces }}{{ else }}all namespaces (cluster-scoped){{ end }}.
 
 This chart installed the CRDs from its own crds/ directory. Helm creates them
-on install and leaves them alone on upgrade. Apply them by hand after a chart
-upgrade that changes a schema:
+on install and leaves them alone on upgrade. After an upgrade that changes a
+schema, apply them by hand from the same chart you upgraded with:
 
-  kubectl apply -f charts/krabka-operator/crds
+  helm pull CHART --version {{ .Chart.Version }} --untar --untardir /tmp/{{ .Chart.Name }}-crds
+  kubectl apply -f /tmp/{{ .Chart.Name }}-crds/{{ .Chart.Name }}/crds
+
+Replace CHART with the reference you gave to `helm upgrade`. If that reference
+is a directory on disk, skip `helm pull` and apply that directory's crds/.
 
 Create a placeholder cluster:
 

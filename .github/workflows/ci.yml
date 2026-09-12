@@ -122,8 +122,19 @@ jobs:
           repository-cache: true
       - name: regenerate
         run: tools/regen-crds.sh
+      # `git diff` reads the tracked tree only. A new kind, or a kind that
+      # changes its group or plural, makes the generator write a file under a
+      # new name. That file stays untracked, `git diff` stays silent, and the
+      # gate passes over a chart that no longer matches the types. Read the
+      # full status of the directory instead, untracked files included.
       - name: fail on drift
-        run: git diff --exit-code -- charts/krabka-operator/crds
+        run: |
+          if [ -n "$(git status --porcelain --untracked-files=all -- charts/krabka-operator/crds)" ]; then
+            echo "::error::charts/krabka-operator/crds is out of sync with the CustomResource types; run tools/regen-crds.sh and commit the result"
+            git --no-pager diff -- charts/krabka-operator/crds
+            git status --porcelain --untracked-files=all -- charts/krabka-operator/crds
+            exit 1
+          fi
   # LCOV over the first-party crates. Separate from `ci` because instrumented
   # binaries are a different build, so sharing that job's cache would only
   # evict it.
