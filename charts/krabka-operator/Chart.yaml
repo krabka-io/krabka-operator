@@ -3,9 +3,10 @@ name: krabka-operator
 description: Kubernetes operator for Krabka clusters
 type: application
 version: 0.1.0
-# appVersion tracks the crate release. CI (docs.yml) overrides both version and
-# appVersion from the workspace Cargo.toml at package time, so this is only the
-# local/dev default — no need to hand-edit it on release.
+# appVersion tracks the crate release. The packager overrides both version and
+# appVersion from the workspace Cargo.toml: see the `helm package` call in
+# packaging/kind-lifecycle.sh. The numbers below are the local/dev default
+# only, so there is no need to hand-edit them on release.
 appVersion: "0.3.6"
 kubeVersion: ">= 1.28.0-0"
 home: https://github.com/krabka-io/krabka-operator
@@ -17,4 +18,4 @@ keywords:
   - operator
 maintainers:
   - name: The Krabka Authors
-icon: https://raw.githubusercontent.com/krabka-io/krabka-operator/main/docs/krabka-square.png
+icon: https://krabka-io.github.io/logo.png
