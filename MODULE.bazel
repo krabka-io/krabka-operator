@@ -11,6 +11,20 @@ module(
 )
 
 bazel_dep(name = "rules_rs", version = "0.0.106")
+
+# rules_rs pins the zlib1g .deb that its rustc toolchain links against by an
+# exact Ubuntu pool URL. Ubuntu replaced 3.1ubuntu2.1 with 3.1ubuntu2.2 and
+# removed the old build from the pool. Both URLs now return 404, so a Rust
+# toolchain fetch without a warm repository cache fails during analysis. The
+# patch points the pin at the build that the pool serves. krabka-broker carries
+# the same patch. Remove it when rules_rs pins a URL that stays valid.
+single_version_override(
+    module_name = "rules_rs",
+    patch_strip = 1,
+    patches = ["//bazel/patches:rules-rs-zlib-url.patch"],
+    version = "0.0.106",
+)
+
 bazel_dep(name = "rules_rs_mutants", version = "0.0.1")
 
 # rules_rs_mutants is not published to the Bazel Central Registry, so the
