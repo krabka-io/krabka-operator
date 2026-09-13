@@ -2,13 +2,15 @@
 //!
 //! These tests assert on the request sequence that the reconciler issues
 //! on the kube side: the Kafka GET, the SSA applies of the Service and the
-//! Deployment, and the status patch. They also assert on the rendered
-//! Deployment container args, its env, and its Secret mounts.
+//! StatefulSet, the removal of an owned Deployment, and the status patch.
+//! They also assert on the rendered StatefulSet container args, its env,
+//! and its Secret mounts.
 
 use std::sync::Arc;
 
 use assert2::assert;
 use http::Method;
+use k8s_openapi::api::{apps::v1::StatefulSet, core::v1::Service};
 use krabka_operator::{
     controller::{common::ReconcileError, schema_registry::reconcile},
     crd::{
@@ -74,19 +76,19 @@ fn schema_registry_apply_rules() -> Vec<MockRule> {
         },
         MockRule {
             method: Method::PATCH,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},
                 "status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
             method: Method::GET,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},
                 "status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
@@ -126,6 +128,8 @@ async fn runtime_policy_renders_exact_flags_and_probe_timings() {
     cr.spec.runtime = Some(valid_runtime());
     cr.spec.client_id = Some("registry-production".into());
     cr.spec.health_checks = Some(SchemaRegistryHealthChecks {
+        startup_period_seconds: Some(4),
+        startup_failure_threshold: Some(75),
         readiness_initial_delay_seconds: Some(3),
         readiness_period_seconds: Some(7),
         liveness_initial_delay_seconds: Some(9),
@@ -140,7 +144,7 @@ async fn runtime_policy_renders_exact_flags_and_probe_timings() {
     let observed = state.take_observed();
     let deployment = observed
         .iter()
-        .find(|request| request.uri().to_string().contains("/deployments/sr1-sr"))
+        .find(|request| request.uri().to_string().contains("/statefulsets/sr1-sr"))
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(deployment.body()).unwrap();
     let container = &body["spec"]["template"]["spec"]["containers"][0];
@@ -163,6 +167,14 @@ async fn runtime_policy_renders_exact_flags_and_probe_timings() {
                 "--default-mode=IMPORT",
                 "--client-id=registry-production",
             ])
+    );
+    assert!(
+        container["startupProbe"]
+            == serde_json::json!({
+                "tcpSocket": { "port": 8081 },
+                "periodSeconds": 4,
+                "failureThreshold": 75,
+            })
     );
     assert!(
         container["readinessProbe"]
@@ -210,7 +222,9 @@ async fn assert_schema_registry_config_invalid(cr: SchemaRegistry) {
     let observed = state.take_observed();
     assert!(!observed.iter().any(|request| {
         let uri = request.uri().to_string();
-        uri.contains("/deployments/") || uri.contains("/services/")
+        uri.contains("/statefulsets/")
+            || uri.contains("/deployments/")
+            || uri.contains("/services/")
     }));
     let status = observed
         .iter()
@@ -232,7 +246,7 @@ async fn assert_schema_registry_config_invalid(cr: SchemaRegistry) {
 }
 
 #[tokio::test]
-async fn runtime_invalid_policy_is_rejected_before_deployment() {
+async fn runtime_invalid_policy_is_rejected_before_workload() {
     for field in [
         "electionSessionTimeout",
         "electionRebalanceTimeout",
@@ -273,28 +287,52 @@ async fn runtime_invalid_policy_is_rejected_before_deployment() {
 
     for health_checks in [
         SchemaRegistryHealthChecks {
+            startup_period_seconds: None,
+            startup_failure_threshold: None,
             readiness_initial_delay_seconds: Some(-1),
             readiness_period_seconds: None,
             liveness_initial_delay_seconds: None,
             liveness_period_seconds: None,
         },
         SchemaRegistryHealthChecks {
+            startup_period_seconds: None,
+            startup_failure_threshold: None,
             readiness_initial_delay_seconds: None,
             readiness_period_seconds: Some(0),
             liveness_initial_delay_seconds: None,
             liveness_period_seconds: None,
         },
         SchemaRegistryHealthChecks {
+            startup_period_seconds: None,
+            startup_failure_threshold: None,
             readiness_initial_delay_seconds: None,
             readiness_period_seconds: None,
             liveness_initial_delay_seconds: Some(-1),
             liveness_period_seconds: None,
         },
         SchemaRegistryHealthChecks {
+            startup_period_seconds: None,
+            startup_failure_threshold: None,
             readiness_initial_delay_seconds: None,
             readiness_period_seconds: None,
             liveness_initial_delay_seconds: None,
             liveness_period_seconds: Some(0),
+        },
+        SchemaRegistryHealthChecks {
+            startup_period_seconds: Some(0),
+            startup_failure_threshold: None,
+            readiness_initial_delay_seconds: None,
+            readiness_period_seconds: None,
+            liveness_initial_delay_seconds: None,
+            liveness_period_seconds: None,
+        },
+        SchemaRegistryHealthChecks {
+            startup_period_seconds: None,
+            startup_failure_threshold: Some(0),
+            readiness_initial_delay_seconds: None,
+            readiness_period_seconds: None,
+            liveness_initial_delay_seconds: None,
+            liveness_period_seconds: None,
         },
     ] {
         let mut cr = sr("sr1", Some(CLUSTER));
@@ -356,7 +394,7 @@ fn ready_kafka_body(name: &str) -> serde_json::Value {
 async fn kafka_present_but_not_ready_gates_with_no_children() {
     // Labeled CR + a Kafka that is NOT Ready -> internal_listener_bootstrap
     // returns None -> KafkaNotReady gate; NO child resources are applied
-    // (no Service/Deployment mock rules, so any apply attempt would 404 and
+    // (no Service/StatefulSet mock rules, so any apply attempt would 404 and
     // fail the reconcile).
     let not_ready = serde_json::json!({
         "apiVersion": "krabka.io/v1alpha1", "kind": "Kafka",
@@ -408,11 +446,10 @@ async fn kafka_present_but_not_ready_gates_with_no_children() {
             .iter()
             .any(|r| r.uri().to_string().contains("/services/"))
     );
-    assert!(
-        !observed
-            .iter()
-            .any(|r| r.uri().to_string().contains("/deployments/"))
-    );
+    assert!(!observed.iter().any(|r| {
+        let uri = r.uri().to_string();
+        uri.contains("/statefulsets/") || uri.contains("/deployments/")
+    }));
     let patch = observed
         .iter()
         .find(|r| r.uri().to_string().contains("/schemaregistries/sr1/status"))
@@ -468,18 +505,18 @@ async fn optional_topic_group_and_bearer_render_to_args() {
         },
         MockRule {
             method: Method::PATCH,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
             method: Method::GET,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
@@ -501,7 +538,7 @@ async fn optional_topic_group_and_bearer_render_to_args() {
     let dep = observed
         .iter()
         .find(|r| {
-            r.method() == Method::PATCH && r.uri().to_string().contains("/deployments/sr1-sr")
+            r.method() == Method::PATCH && r.uri().to_string().contains("/statefulsets/sr1-sr")
         })
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(dep.body()).unwrap();
@@ -564,7 +601,8 @@ async fn missing_cluster_label_sets_status() {
 #[tokio::test]
 async fn renders_children_when_kafka_ready() {
     // FIFO: GET Kafka (ready) → apply headless svc → apply clusterip svc →
-    // apply deployment → GET deployment (status) → PATCH status.
+    // apply statefulset → GET deployment (absent) → GET statefulset (status)
+    // → PATCH status.
     let rules = vec![
         MockRule {
             method: Method::GET,
@@ -589,19 +627,19 @@ async fn renders_children_when_kafka_ready() {
         },
         MockRule {
             method: Method::PATCH,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},
                 "status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
             method: Method::GET,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},
                 "status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
@@ -616,47 +654,132 @@ async fn renders_children_when_kafka_ready() {
     ];
     let state = MockState::new(rules);
     let client = mock_client(&state, NS);
-    let ctx = Arc::new(fixture_ctx(client, NS));
+    let mut ctx = fixture_ctx(client, NS);
+    Arc::get_mut(&mut ctx.config)
+        .expect("fixture owns operator config")
+        .default_schema_registry_image = Some("registry.test/schema-registry:1".into());
 
-    reconcile(Arc::new(sr("sr1", Some(CLUSTER))), ctx)
+    reconcile(Arc::new(sr("sr1", Some(CLUSTER))), Arc::new(ctx))
         .await
         .unwrap();
 
     let observed = state.take_observed();
-    // The Deployment apply body carries the derived --bootstrap-servers arg.
-    let dep = observed
+    let labels = serde_json::json!({
+        "app.kubernetes.io/name": "krabka-schema-registry",
+        "app.kubernetes.io/instance": "sr1",
+        "app.kubernetes.io/component": "schema-registry",
+        "app.kubernetes.io/version": "0.1.1",
+        "app.kubernetes.io/managed-by": "krabka-operator",
+    });
+    let selector = serde_json::json!({
+        "app.kubernetes.io/name": "krabka-schema-registry",
+        "app.kubernetes.io/instance": "sr1",
+        "app.kubernetes.io/component": "schema-registry",
+    });
+    let owner_references = serde_json::json!([{
+        "apiVersion": "krabka.io/v1alpha1",
+        "kind": "SchemaRegistry",
+        "name": "sr1",
+        "uid": "uid-1",
+        "controller": true,
+        "blockOwnerDeletion": true,
+    }]);
+
+    // The headless Service publishes pods that are not yet ready, so a pod
+    // elected primary during its own start resolves.
+    let headless = observed
         .iter()
         .find(|r| {
-            r.method() == Method::PATCH && r.uri().to_string().contains("/deployments/sr1-sr")
+            r.method() == Method::PATCH && r.uri().to_string().contains("/services/sr1-sr-headless")
         })
         .unwrap();
-    let body: serde_json::Value = serde_json::from_slice(dep.body()).unwrap();
-    let args = body["spec"]["template"]["spec"]["containers"][0]["args"]
-        .as_array()
-        .unwrap();
-    let joined = args
+    let headless: Service = serde_json::from_slice(headless.body()).unwrap();
+    let expected_headless: Service = serde_json::from_value(serde_json::json!({
+        "metadata": {
+            "name": "sr1-sr-headless",
+            "namespace": NS,
+            "labels": labels,
+            "ownerReferences": owner_references,
+        },
+        "spec": {
+            "clusterIP": "None",
+            "publishNotReadyAddresses": true,
+            "selector": selector,
+            "ports": [{ "name": "rest", "port": 8081, "protocol": "TCP", "targetPort": 8081 }],
+        }
+    }))
+    .unwrap();
+    assert!(headless == expected_headless);
+
+    // The StatefulSet names the headless Service, so each pod gets the DNS
+    // record that its advertised URL names. The startup probe covers the
+    // replay of the schemas topic.
+    let statefulset = observed
         .iter()
-        .map(|a| a.as_str().unwrap())
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(
-        joined.contains("--bootstrap-servers=demo-broker-headless.default.svc.cluster.local:9092")
-    );
-    assert!(joined.contains("--schemas-topic-rf=1"));
-    // advertised-url env uses $(POD_NAME) interpolation.
-    let env = body["spec"]["template"]["spec"]["containers"][0]["env"]
-        .as_array()
+        .find(|r| {
+            r.method() == Method::PATCH && r.uri().to_string().contains("/statefulsets/sr1-sr")
+        })
         .unwrap();
-    let adv = env
-        .iter()
-        .find(|e| e["name"] == "SCHEMA_REGISTRY_ADVERTISED_URL")
-        .unwrap();
-    assert!(
-        adv["value"]
-            .as_str()
-            .unwrap()
-            .contains("$(POD_NAME).sr1-sr-headless.default.svc.cluster.local:8081")
-    );
+    let statefulset: StatefulSet = serde_json::from_slice(statefulset.body()).unwrap();
+    let expected_statefulset: StatefulSet = serde_json::from_value(serde_json::json!({
+        "metadata": {
+            "name": "sr1-sr",
+            "namespace": NS,
+            "labels": labels,
+            "ownerReferences": owner_references,
+        },
+        "spec": {
+            "serviceName": "sr1-sr-headless",
+            "replicas": 1,
+            "podManagementPolicy": "Parallel",
+            "updateStrategy": { "type": "RollingUpdate" },
+            "selector": { "matchLabels": selector },
+            "template": {
+                "metadata": { "labels": selector },
+                "spec": {
+                    "securityContext": { "runAsNonRoot": true, "runAsUser": 65532, "fsGroup": 65532 },
+                    "volumes": [],
+                    "containers": [{
+                        "name": "schema-registry",
+                        "image": "registry.test/schema-registry:1",
+                        "args": [
+                            "--bootstrap-servers=demo-broker-headless.default.svc.cluster.local:9092",
+                            "--listen-addr=0.0.0.0:8081",
+                            "--schemas-topic-rf=1",
+                        ],
+                        "env": [
+                            { "name": "POD_NAME", "valueFrom": { "fieldRef": { "fieldPath": "metadata.name" } } },
+                            {
+                                "name": "SCHEMA_REGISTRY_ADVERTISED_URL",
+                                "value": "http://$(POD_NAME).sr1-sr-headless.default.svc.cluster.local:8081",
+                            },
+                        ],
+                        "ports": [{ "name": "rest", "containerPort": 8081, "protocol": "TCP" }],
+                        "volumeMounts": [],
+                        "startupProbe": {
+                            "tcpSocket": { "port": 8081 },
+                            "periodSeconds": 5,
+                            "failureThreshold": 60,
+                        },
+                        "readinessProbe": {
+                            "tcpSocket": { "port": 8081 },
+                            "initialDelaySeconds": 2,
+                            "periodSeconds": 5,
+                        },
+                        "livenessProbe": {
+                            "tcpSocket": { "port": 8081 },
+                            "initialDelaySeconds": 5,
+                            "periodSeconds": 10,
+                        },
+                        "resources": {},
+                    }],
+                }
+            }
+        }
+    }))
+    .unwrap();
+    assert!(statefulset == expected_statefulset);
+
     // Status rolled up to Ready/Available.
     let st = observed
         .iter()
@@ -670,6 +793,95 @@ async fn renders_children_when_kafka_ready() {
         .find(|c| c["type"] == "Ready")
         .unwrap();
     assert!(ready["status"] == "True");
+    assert!(sb["status"]["replicas"] == 1);
+    assert!(sb["status"]["readyReplicas"] == 1);
+}
+
+/// A Deployment that this `SchemaRegistry` owns, as an earlier operator
+/// build rendered it.
+fn deployment_body(owner_uid: &str) -> serde_json::Value {
+    serde_json::json!({
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": "sr1-sr",
+            "namespace": NS,
+            "ownerReferences": [{
+                "apiVersion": "krabka.io/v1alpha1",
+                "kind": "SchemaRegistry",
+                "name": "sr1",
+                "uid": owner_uid,
+                "controller": true,
+            }],
+        },
+    })
+}
+
+#[tokio::test]
+async fn owned_deployment_is_deleted_after_the_statefulset_is_applied() {
+    // A Deployment cannot become a StatefulSet in place. The reconciler
+    // applies the StatefulSet, then deletes the Deployment of the same name
+    // when this SchemaRegistry owns it. It leaves any other Deployment.
+    for (case, existing, expected) in [
+        ("no deployment", None, vec![Method::GET]),
+        (
+            "owned deployment",
+            Some(deployment_body("uid-1")),
+            vec![Method::GET, Method::DELETE],
+        ),
+        (
+            "foreign deployment",
+            Some(deployment_body("uid-other")),
+            vec![Method::GET],
+        ),
+    ] {
+        let mut cr = sr("sr1", Some(CLUSTER));
+        cr.spec.bootstrap_servers = Some("ext:9092".into());
+        let mut rules = schema_registry_apply_rules();
+        if let Some(existing) = existing {
+            rules.push(MockRule {
+                method: Method::GET,
+                path_substr: "/deployments/sr1-sr".into(),
+                response: json_response(200, &existing),
+            });
+            rules.push(MockRule {
+                method: Method::DELETE,
+                path_substr: "/deployments/sr1-sr".into(),
+                response: json_response(200, &existing),
+            });
+        }
+        let state = MockState::new(rules);
+        let client = mock_client(&state, NS);
+        let ctx = Arc::new(fixture_ctx(client, NS));
+
+        reconcile(Arc::new(cr), ctx).await.unwrap();
+
+        let observed = state.take_observed();
+        let deployment_calls: Vec<(usize, Method)> = observed
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.uri().path().ends_with("/deployments/sr1-sr"))
+            .map(|(index, r)| (index, r.method().clone()))
+            .collect();
+        let methods: Vec<Method> = deployment_calls
+            .iter()
+            .map(|(_, method)| method.clone())
+            .collect();
+        assert!(methods == expected, "case: {case}");
+
+        let statefulset_apply = observed
+            .iter()
+            .position(|r| {
+                r.method() == Method::PATCH && r.uri().path().ends_with("/statefulsets/sr1-sr")
+            })
+            .unwrap();
+        assert!(
+            deployment_calls
+                .iter()
+                .all(|(index, _)| *index > statefulset_apply),
+            "case: {case}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -717,19 +929,19 @@ async fn full_security_fields_render_to_args_and_mounts() {
         },
         MockRule {
             method: Method::PATCH,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},
                 "status":{"replicas":1,"readyReplicas":0}}),
             ),
         },
         MockRule {
             method: Method::GET,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},
                 "status":{"replicas":1,"readyReplicas":0}}),
             ),
         },
@@ -751,7 +963,7 @@ async fn full_security_fields_render_to_args_and_mounts() {
     let dep = observed
         .iter()
         .find(|r| {
-            r.method() == Method::PATCH && r.uri().to_string().contains("/deployments/sr1-sr")
+            r.method() == Method::PATCH && r.uri().to_string().contains("/statefulsets/sr1-sr")
         })
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(dep.body()).unwrap();
@@ -815,18 +1027,18 @@ async fn kafka_client_missing_when_absent() {
         },
         MockRule {
             method: Method::PATCH,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
             method: Method::GET,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
@@ -847,7 +1059,7 @@ async fn kafka_client_missing_when_absent() {
     let dep = observed
         .iter()
         .find(|r| {
-            r.method() == Method::PATCH && r.uri().to_string().contains("/deployments/sr1-sr")
+            r.method() == Method::PATCH && r.uri().to_string().contains("/statefulsets/sr1-sr")
         })
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(dep.body()).unwrap();
@@ -897,18 +1109,18 @@ async fn kafka_client_sasl_ssl_renders_to_args_and_env() {
         },
         MockRule {
             method: Method::PATCH,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
             method: Method::GET,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
@@ -929,7 +1141,7 @@ async fn kafka_client_sasl_ssl_renders_to_args_and_env() {
     let dep = observed
         .iter()
         .find(|r| {
-            r.method() == Method::PATCH && r.uri().to_string().contains("/deployments/sr1-sr")
+            r.method() == Method::PATCH && r.uri().to_string().contains("/statefulsets/sr1-sr")
         })
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(dep.body()).unwrap();
@@ -1016,11 +1228,10 @@ async fn secret_name_and_issuer_ref_mutual_exclusion() {
     reconcile(Arc::new(cr), ctx).await.unwrap();
 
     let observed = state.take_observed();
-    assert!(
-        !observed
-            .iter()
-            .any(|r| r.uri().to_string().contains("/deployments/"))
-    );
+    assert!(!observed.iter().any(|r| {
+        let uri = r.uri().to_string();
+        uri.contains("/statefulsets/") || uri.contains("/deployments/")
+    }));
     let patch = observed
         .iter()
         .find(|r| r.uri().to_string().contains("/schemaregistries/sr1/status"))
@@ -1089,10 +1300,11 @@ async fn issuer_ref_creates_certificate_cr_and_waits() {
         "expected Certificate CR PATCH"
     );
     assert!(
-        !observed
-            .iter()
-            .any(|r| r.uri().to_string().contains("/deployments/")),
-        "expected no deployment while WaitingForCert"
+        !observed.iter().any(|r| {
+            let uri = r.uri().to_string();
+            uri.contains("/statefulsets/") || uri.contains("/deployments/")
+        }),
+        "expected no workload while WaitingForCert"
     );
     let patch = observed
         .iter()
@@ -1109,7 +1321,7 @@ async fn issuer_ref_creates_certificate_cr_and_waits() {
 }
 
 #[tokio::test]
-async fn issuer_ref_with_cert_secret_ready_renders_deployment() {
+async fn issuer_ref_with_cert_secret_ready_renders_statefulset() {
     let mut cr = sr("sr1", Some(CLUSTER));
     cr.spec.bootstrap_servers = Some("ext:9092".into());
     cr.spec.tls = Some(krabka_operator::crd::SchemaRegistryTls {
@@ -1157,18 +1369,18 @@ async fn issuer_ref_with_cert_secret_ready_renders_deployment() {
         },
         MockRule {
             method: Method::PATCH,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
             method: Method::GET,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
@@ -1189,7 +1401,7 @@ async fn issuer_ref_with_cert_secret_ready_renders_deployment() {
     let dep = observed
         .iter()
         .find(|r| {
-            r.method() == Method::PATCH && r.uri().to_string().contains("/deployments/sr1-sr")
+            r.method() == Method::PATCH && r.uri().to_string().contains("/statefulsets/sr1-sr")
         })
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(dep.body()).unwrap();
@@ -1249,18 +1461,18 @@ async fn bearer_jwks_renders_to_args() {
         },
         MockRule {
             method: Method::PATCH,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
             method: Method::GET,
-            path_substr: "/deployments/sr1-sr".into(),
+            path_substr: "/statefulsets/sr1-sr".into(),
             response: json_response(
                 200,
-                &serde_json::json!({"kind":"Deployment","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
+                &serde_json::json!({"kind":"StatefulSet","metadata":{"name":"sr1-sr"},"status":{"replicas":1,"readyReplicas":1}}),
             ),
         },
         MockRule {
@@ -1281,7 +1493,7 @@ async fn bearer_jwks_renders_to_args() {
     let dep = observed
         .iter()
         .find(|r| {
-            r.method() == Method::PATCH && r.uri().to_string().contains("/deployments/sr1-sr")
+            r.method() == Method::PATCH && r.uri().to_string().contains("/statefulsets/sr1-sr")
         })
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(dep.body()).unwrap();

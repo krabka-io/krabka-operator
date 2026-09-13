@@ -1,14 +1,22 @@
 //! `SchemaRegistry` reconciler.
 //!
-//! This reconciler renders a stateless Deployment, a headless Service, and a
+//! This reconciler renders a StatefulSet, a headless Service, and a
 //! `ClusterIP` Service for the `krabka-schema-registry` binary. The
 //! `krabka.io/cluster` label associates them with a managed `Kafka`.
+//!
+//! The registry keeps no state on disk. It runs as a StatefulSet for the pod
+//! DNS names. Each pod advertises
+//! `$(POD_NAME).<name>-sr-headless.<namespace>.svc.cluster.local`, and a
+//! secondary forwards writes to that URL of the primary. The headless Service
+//! publishes a record for a pod only when the pod sets both `hostname` and
+//! `subdomain`. The StatefulSet controller sets both. A Deployment sets
+//! neither.
 
 use std::{collections::BTreeMap, sync::Arc};
 
 use futures::StreamExt as _;
 use k8s_openapi::api::{
-    apps::v1::Deployment,
+    apps::v1::{Deployment, StatefulSet},
     core::v1::{Secret, Service},
 };
 use krabka_units::{
@@ -19,7 +27,7 @@ use krabka_units::{
 };
 use kube::{
     Resource, ResourceExt as _,
-    api::{Api, DynamicObject, Patch, PatchParams},
+    api::{Api, DeleteParams, DynamicObject, Patch, PatchParams},
     core::{ApiResource, GroupVersionKind},
     runtime::{
         controller::{Action, Controller},
@@ -48,6 +56,8 @@ const SR_PORT: i32 = 8081;
 const DEFAULT_ELECTION_SESSION_TIMEOUT: Time = secs(10);
 const DEFAULT_ELECTION_REBALANCE_TIMEOUT: Time = secs(30);
 const DEFAULT_ELECTION_HEARTBEAT_INTERVAL: Time = secs(3);
+const DEFAULT_STARTUP_PERIOD_SECONDS: i32 = 5;
+const DEFAULT_STARTUP_FAILURE_THRESHOLD: i32 = 60;
 const DEFAULT_IMAGE: &str = concat!(
     "ghcr.io/krabka-io/krabka-operator-schema-registry:",
     env!("CARGO_PKG_VERSION")
@@ -226,9 +236,9 @@ async fn reconcile_inner(
         None
     };
 
-    // 4. Render + apply children (Deployment + 2 Services).
+    // 4. Render + apply children (StatefulSet + 2 Services).
     let svc_api: Api<Service> = Api::namespaced(ctx.client.clone(), &ns);
-    let dep_api: Api<Deployment> = Api::namespaced(ctx.client.clone(), &ns);
+    let sts_api: Api<StatefulSet> = Api::namespaced(ctx.client.clone(), &ns);
 
     let headless = render_headless_service(&obj)?;
     apply_object(&svc_api, &headless_name(&name), &headless).await?;
@@ -240,15 +250,17 @@ async fn reconcile_inner(
         .clone()
         .or_else(|| ctx.config.default_schema_registry_image.clone())
         .unwrap_or_else(|| DEFAULT_IMAGE.to_string());
-    let deployment = render_deployment(&obj, &bootstrap, &image, tls_secret_name.as_deref())?;
-    apply_object(&dep_api, &deployment_name(&name), &deployment).await?;
+    let statefulset = render_statefulset(&obj, &bootstrap, &image, tls_secret_name.as_deref())?;
+    apply_object(&sts_api, &statefulset_name(&name), &statefulset).await?;
+    let dep_api: Api<Deployment> = Api::namespaced(ctx.client.clone(), &ns);
+    delete_owned_deployment(&dep_api, &statefulset_name(&name), &obj).await?;
 
-    // 5. Status from the live Deployment.
-    let live = dep_api.get_opt(&deployment_name(&name)).await?;
+    // 5. Status from the live StatefulSet.
+    let live = sts_api.get_opt(&statefulset_name(&name)).await?;
     let (replicas, ready) = live
         .as_ref()
-        .and_then(|d| d.status.as_ref())
-        .map_or((None, None), |s| (s.replicas, s.ready_replicas));
+        .and_then(|sts| sts.status.as_ref())
+        .map_or((None, None), |s| (Some(s.replicas), s.ready_replicas));
     let desired = obj.spec.replicas;
     let scheme = if tls_secret_name.is_some() {
         "https"
@@ -287,7 +299,7 @@ async fn reconcile_inner(
     Ok(common::requeue(ctx.config.controller_drift_requeue))
 }
 
-fn deployment_name(n: &str) -> String {
+fn statefulset_name(n: &str) -> String {
     format!("{n}-sr")
 }
 fn service_name(n: &str) -> String {
@@ -457,6 +469,16 @@ fn validate_config(spec: &SchemaRegistrySpec) -> Result<(), String> {
     }
     if let Some(health) = &spec.health_checks {
         validate!(
+            health.startup_period_seconds,
+            refined_type::rule::GreaterI32<0>,
+            "spec.healthChecks.startupPeriodSeconds"
+        );
+        validate!(
+            health.startup_failure_threshold,
+            refined_type::rule::GreaterI32<0>,
+            "spec.healthChecks.startupFailureThreshold"
+        );
+        validate!(
             health.readiness_initial_delay_seconds,
             refined_type::rule::GreaterEqualI32<0>,
             "spec.healthChecks.readinessInitialDelaySeconds"
@@ -499,10 +521,10 @@ fn validate_config(spec: &SchemaRegistrySpec) -> Result<(), String> {
     Ok(())
 }
 
-/// Stable label set for the Deployment `selector.matchLabels`, the pod
-/// template labels, and BOTH Services' `spec.selector`. Deployment selectors
+/// Stable label set for the StatefulSet `selector.matchLabels`, the pod
+/// template labels, and BOTH Services' `spec.selector`. StatefulSet selectors
 /// are immutable, so this map must NOT carry the version label. A value that
-/// churns there would make the Deployment un-updatable, and a mismatch between
+/// churns there would make the StatefulSet un-updatable, and a mismatch between
 /// the selector and the template would keep pods from becoming Ready.
 fn selector_labels(obj: &SchemaRegistry) -> BTreeMap<String, String> {
     let instance = obj.name_any();
@@ -540,6 +562,10 @@ fn render_headless_service(obj: &SchemaRegistry) -> Result<Service, ReconcileErr
         },
         "spec": {
             "clusterIP": "None",
+            // A pod that wins the primary election before it passes its
+            // readiness probe must still resolve. Otherwise the secondaries
+            // cannot forward writes to it.
+            "publishNotReadyAddresses": true,
             "selector": selector_labels(obj),
             "ports": [{ "name": "rest", "port": SR_PORT, "protocol": "TCP", "targetPort": SR_PORT }],
         }
@@ -565,12 +591,12 @@ fn render_clusterip_service(obj: &SchemaRegistry) -> Result<Service, ReconcileEr
     Ok(svc)
 }
 
-fn render_deployment(
+fn render_statefulset(
     obj: &SchemaRegistry,
     bootstrap: &str,
     image: &str,
     tls_secret: Option<&str>,
-) -> Result<Deployment, ReconcileError> {
+) -> Result<StatefulSet, ReconcileError> {
     let name = obj.name_any();
     let ns = obj
         .meta()
@@ -591,6 +617,12 @@ fn render_deployment(
         ns
     );
     let health = obj.spec.health_checks.as_ref();
+    let startup_period_seconds = health
+        .and_then(|checks| checks.startup_period_seconds)
+        .unwrap_or(DEFAULT_STARTUP_PERIOD_SECONDS);
+    let startup_failure_threshold = health
+        .and_then(|checks| checks.startup_failure_threshold)
+        .unwrap_or(DEFAULT_STARTUP_FAILURE_THRESHOLD);
     let readiness_initial_delay_seconds = health
         .and_then(|checks| checks.readiness_initial_delay_seconds)
         .unwrap_or(2);
@@ -608,15 +640,22 @@ fn render_deployment(
         json!({ "name": "SCHEMA_REGISTRY_ADVERTISED_URL", "value": advertised }),
     ];
     env.extend(extra_env);
-    let dep = serde_json::from_value(json!({
+    let sts = serde_json::from_value(json!({
         "metadata": {
-            "name": deployment_name(&name),
+            "name": statefulset_name(&name),
             "namespace": obj.meta().namespace.clone(),
             "labels": meta_labels(obj),
             "ownerReferences": [owner_ref::<SchemaRegistry>(obj)?],
         },
         "spec": {
+            // The StatefulSet controller sets `hostname` to the pod name and
+            // `subdomain` to this Service. That gives the advertised URL a DNS
+            // record.
+            "serviceName": headless_name(&name),
             "replicas": obj.spec.replicas,
+            // The pods keep no state on disk, so they start together.
+            "podManagementPolicy": "Parallel",
+            "updateStrategy": { "type": "RollingUpdate" },
             "selector": { "matchLabels": selector },
             "template": {
                 "metadata": { "labels": selector },
@@ -630,6 +669,15 @@ fn render_deployment(
                         "env": env,
                         "ports": [{ "name": "rest", "containerPort": SR_PORT, "protocol": "TCP" }],
                         "volumeMounts": mounts,
+                        // The registry binds the REST port only after
+                        // `KafkaStore::start` replays the schemas topic. The
+                        // startup probe holds the liveness probe back until
+                        // then, so a long replay does not end in a restart.
+                        "startupProbe": {
+                            "tcpSocket": { "port": SR_PORT },
+                            "periodSeconds": startup_period_seconds,
+                            "failureThreshold": startup_failure_threshold,
+                        },
                         "readinessProbe": {
                             "tcpSocket": { "port": SR_PORT },
                             "initialDelaySeconds": readiness_initial_delay_seconds,
@@ -646,7 +694,40 @@ fn render_deployment(
             }
         }
     }))?;
-    Ok(dep)
+    Ok(sts)
+}
+
+/// Delete the Deployment that an earlier operator build rendered for this
+/// registry.
+///
+/// A Deployment cannot become a StatefulSet in place, and both would select
+/// the same pods. The function deletes the Deployment only when this
+/// `SchemaRegistry` owns it, so a Deployment of the same name that a user
+/// made stays.
+async fn delete_owned_deployment(
+    api: &Api<Deployment>,
+    name: &str,
+    owner: &SchemaRegistry,
+) -> Result<(), ReconcileError> {
+    let Some(deployment) = api.get_opt(name).await? else {
+        return Ok(());
+    };
+    let owned = owner.meta().uid.as_ref().is_some_and(|uid| {
+        deployment
+            .metadata
+            .owner_references
+            .iter()
+            .flatten()
+            .any(|reference| &reference.uid == uid)
+    });
+    if !owned {
+        return Ok(());
+    }
+    match api.delete(name, &DeleteParams::background()).await {
+        Ok(_) => Ok(()),
+        Err(kube::Error::Api(status)) if status.code == 404 => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Build the container args and the Secret volumes and mounts from the spec.
@@ -956,10 +1037,16 @@ async fn set_status(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use assert2::assert;
+    use k8s_openapi::{
+        api::core::v1::{Probe, TCPSocketAction},
+        apimachinery::pkg::util::intstr::IntOrString,
+    };
 
-    #[test]
-    fn configured_client_policy_renders_once() {
+    use super::*;
+    use crate::crd::SchemaRegistryHealthChecks;
+
+    fn registry_fixture() -> SchemaRegistry {
         let mut registry = SchemaRegistry::new(
             "registry",
             SchemaRegistrySpec {
@@ -979,6 +1066,80 @@ mod tests {
                 resources: None,
             },
         );
+        registry.metadata.namespace = Some("kafka".into());
+        registry.metadata.uid = Some("uid-1".into());
+        registry
+    }
+
+    fn tcp_probe(period_seconds: i32, failure_threshold: i32) -> Probe {
+        Probe {
+            tcp_socket: Some(TCPSocketAction {
+                host: None,
+                port: IntOrString::Int(SR_PORT),
+            }),
+            period_seconds: Some(period_seconds),
+            failure_threshold: Some(failure_threshold),
+            ..Probe::default()
+        }
+    }
+
+    #[test]
+    fn render_statefulset_has_startup_probe_for_slow_schema_replay() {
+        // The registry binds the REST port only after it replays the schemas
+        // topic. Without a startup probe the liveness probe kills a pod
+        // about 35 seconds into a longer replay, and the pod never starts.
+        for (health_checks, expected) in [
+            (None, tcp_probe(5, 60)),
+            (
+                Some(SchemaRegistryHealthChecks {
+                    startup_period_seconds: Some(10),
+                    startup_failure_threshold: Some(90),
+                    ..SchemaRegistryHealthChecks::default()
+                }),
+                tcp_probe(10, 90),
+            ),
+        ] {
+            let mut registry = registry_fixture();
+            registry.spec.health_checks = health_checks;
+            let sts = render_statefulset(&registry, "boot:9092", "img:1", None).unwrap();
+            let pod = sts.spec.unwrap().template.spec.unwrap();
+            assert!(pod.containers[0].startup_probe == Some(expected));
+        }
+    }
+
+    #[test]
+    fn render_statefulset_is_governed_by_the_headless_service() {
+        let registry = registry_fixture();
+        let sts = render_statefulset(&registry, "boot:9092", "img:1", None).unwrap();
+        let spec = sts.spec.unwrap();
+        assert!(spec.service_name.as_deref() == Some("registry-sr-headless"));
+        assert!(spec.pod_management_policy.as_deref() == Some("Parallel"));
+
+        let headless = render_headless_service(&registry).unwrap();
+        let headless_spec = headless.spec.unwrap();
+        assert!(headless.metadata.name.as_deref() == Some("registry-sr-headless"));
+        assert!(headless_spec.publish_not_ready_addresses == Some(true));
+        assert!(headless_spec.selector == Some(spec.selector.match_labels.unwrap()));
+    }
+
+    #[test]
+    fn startup_probe_validation_rejects_non_positive_values() {
+        for health_checks in [
+            serde_json::json!({"startupPeriodSeconds": 0}),
+            serde_json::json!({"startupFailureThreshold": 0}),
+        ] {
+            let spec: SchemaRegistrySpec = serde_json::from_value(serde_json::json!({
+                "replicas": 1,
+                "healthChecks": health_checks,
+            }))
+            .unwrap();
+            assert!(validate_config(&spec).is_err(), "accepted {health_checks}");
+        }
+    }
+
+    #[test]
+    fn configured_client_policy_renders_once() {
+        let mut registry = registry_fixture();
         registry.spec.runtime = Some(crate::crd::SchemaRegistryRuntime {
             client_dispatch_queue_capacity: Some(7),
             client_frame_max: Some(krabka_units::kibibytes(32)),
@@ -986,17 +1147,17 @@ mod tests {
         });
 
         let (args, _, _, _) = build_args_and_mounts(&registry, "boot:9092", None);
-        assert_eq!(
+        assert!(
             args.iter()
                 .filter(|arg| *arg == "--client-dispatch-queue-capacity=7")
-                .count(),
-            1
+                .count()
+                == 1
         );
-        assert_eq!(
+        assert!(
             args.iter()
                 .filter(|arg| *arg == "--client-frame-max=32768B")
-                .count(),
-            1
+                .count()
+                == 1
         );
 
         registry.spec.runtime = None;

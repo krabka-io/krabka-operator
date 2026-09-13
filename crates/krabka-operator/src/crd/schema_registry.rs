@@ -176,10 +176,25 @@ pub struct SchemaRegistryRuntime {
     pub default_mode: Option<String>,
 }
 
-/// Kubernetes readiness and liveness probe timing.
+/// Kubernetes startup, readiness and liveness probe timing.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SchemaRegistryHealthChecks {
+    /// Seconds between two startup probes. Default 5.
+    ///
+    /// The registry binds its REST port only after it replays the schemas
+    /// topic. The startup probe holds the liveness probe back until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub startup_period_seconds: Option<i32>,
+    /// Failed startup probes before the kubelet restarts the container.
+    /// Default 60.
+    ///
+    /// Set it so that `startupPeriodSeconds` times this value covers the
+    /// longest replay of the schemas topic. The defaults allow 5 minutes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub startup_failure_threshold: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0))]
     pub readiness_initial_delay_seconds: Option<i32>,
