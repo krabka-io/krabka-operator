@@ -15,17 +15,15 @@ brokerImage:
 # internal mirror in air-gapped clusters.
 shellImage: busybox@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
 
-# Default gateway image used when a KafkaGrpcGateway CR doesn't override it.
-gatewayImage:
-  repository: ghcr.io/krabka-io/krabka-operator-grpc-gateway
-  tag: ""
-  pullPolicy: IfNotPresent
-
-# Default image used for operator-managed KafkaConnector workloads.
-connectorImage:
-  repository: ghcr.io/krabka-io/krabka-operator-connect-worker
-  tag: ""
-  pullPolicy: IfNotPresent
+# Default images of the components that the operator runs, for a resource
+# that sets no spec.image. Each value is a whole image reference. An empty
+# value keeps the default that is built into the operator. That default names
+# the repository that publishes the component image and a component release
+# tag, which is not the operator version. Set a value to use a mirror or
+# another release.
+gatewayImage: ""
+connectorImage: ""
+schemaRegistryImage: ""
 
 # Default images for operator-managed Gres compute and activator workloads.
 gresImage:

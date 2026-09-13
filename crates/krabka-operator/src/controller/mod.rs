@@ -6,6 +6,7 @@
 
 pub mod cluster_ca;
 pub mod common;
+pub mod component_images;
 pub mod connector;
 pub mod grpc_gateway;
 pub mod kafka;
