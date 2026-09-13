@@ -36,8 +36,15 @@ spec:
             - run
             - --default-broker-image={{ .Values.brokerImage.repository }}{{ if .Values.brokerImage.digest }}@{{ .Values.brokerImage.digest }}{{ else }}:{{ .Values.brokerImage.tag | default .Chart.AppVersion }}{{ end }}
             - --default-shell-image={{ .Values.shellImage }}
-            - --default-gateway-image={{ .Values.gatewayImage.repository }}:{{ .Values.gatewayImage.tag | default .Chart.AppVersion }}
-            - --default-connector-image={{ .Values.connectorImage.repository }}:{{ .Values.connectorImage.tag | default .Chart.AppVersion }}
+            {{- with .Values.gatewayImage }}
+            - --default-gateway-image={{ . }}
+            {{- end }}
+            {{- with .Values.connectorImage }}
+            - --default-connector-image={{ . }}
+            {{- end }}
+            {{- with .Values.schemaRegistryImage }}
+            - --default-schema-registry-image={{ . }}
+            {{- end }}
             - --default-gres-image={{ .Values.gresImage.repository }}:{{ .Values.gresImage.tag | default .Chart.AppVersion }}
             - --default-gres-activator-image={{ .Values.gresActivatorImage.repository }}:{{ .Values.gresActivatorImage.tag | default .Chart.AppVersion }}
             - --default-pgdog-image={{ .Values.pgdogImage.repository }}:{{ .Values.pgdogImage.tag }}
