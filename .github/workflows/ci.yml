@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: krabka-io/krabka-rebalancer
-          ref: f932eab4004349417806eefec738ef0b20ad26f4
+          ref: 157c27c577dfb3ea1a7528f072962a5071fbbb06
           path: .m20/rebalancer
       - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
         with:
@@ -43,7 +43,7 @@ jobs:
           install_only: true
       - run: docker build --tag krabka-operator:e2e --file packaging/Dockerfile .
       - run: >-
-          bazel test --config=docker //:kind_lifecycle_test --test_env=EVIDENCE_DIR=${RUNNER_TEMP}/operator-evidence --test_env=BROKER_IMAGE=ghcr.io/krabka-io/krabka-broker@sha256:82744b30f968b53c85545a6208aa4745e2acc12244344d0be6d84b953d61dcb0 --test_env=BROKER_REVISION=986cf6693eebf820c9088e4687a26e1934f50b9b --test_env=REBALANCER_IMAGE=ghcr.io/krabka-io/krabka-rebalancer@sha256:706b3b51a521d97d4166d98a1f39e045b5dfa1508b155bce174161c4bc009b11 --test_env=REBALANCER_REVISION=f932eab4004349417806eefec738ef0b20ad26f4 --test_env=REBALANCER_CHART=${GITHUB_WORKSPACE}/.m20/rebalancer/charts/crabka-rebalancer --test_env=OPERATOR_REVISION=${GITHUB_SHA} --test_output=streamed
+          bazel test --config=docker //:kind_lifecycle_test --test_env=EVIDENCE_DIR=${RUNNER_TEMP}/operator-evidence --test_env=BROKER_IMAGE=ghcr.io/krabka-io/krabka-broker@sha256:82744b30f968b53c85545a6208aa4745e2acc12244344d0be6d84b953d61dcb0 --test_env=BROKER_REVISION=986cf6693eebf820c9088e4687a26e1934f50b9b --test_env=REBALANCER_IMAGE=ghcr.io/krabka-io/krabka-rebalancer@sha256:6479727a755cb6ae10b378f66cd44c35b22b86ee85142a91f355ea22eeb38500 --test_env=REBALANCER_REVISION=157c27c577dfb3ea1a7528f072962a5071fbbb06 --test_env=REBALANCER_CHART=${GITHUB_WORKSPACE}/.m20/rebalancer/charts/krabka-rebalancer --test_env=OPERATOR_REVISION=${GITHUB_SHA} --test_output=streamed
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: github.event_name == 'push'
         with:

@@ -1,7 +1,7 @@
 //! Reconcile-level tests for the `KafkaRebalance` controller.
 //!
 //! These tests drive the annotation-driven state machine of the controller
-//! against a faked `crabka-rebalancer`, the `FakeRebalancerClient`. They
+//! against a faked `krabka-rebalancer`, the `FakeRebalancerClient`. They
 //! assert on the Connect-RPC sequence, and on the status patches and the
 //! annotation patches on the kube side.
 

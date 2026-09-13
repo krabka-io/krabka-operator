@@ -2,8 +2,8 @@
 set -euo pipefail
 
 broker_image="${BROKER_IMAGE:-krabka-io/krabka-broker:dev}"
-rebalancer_image="${REBALANCER_IMAGE:-crabka-rebalancer:m20}"
-rebalancer_chart="${REBALANCER_CHART:?set REBALANCER_CHART to the crabka-rebalancer chart}"
+rebalancer_image="${REBALANCER_IMAGE:-krabka-rebalancer:m20}"
+rebalancer_chart="${REBALANCER_CHART:?set REBALANCER_CHART to the krabka-rebalancer chart}"
 operator_image="${OPERATOR_IMAGE:-krabka-operator:e2e}"
 kafka_tools_image="mirror.gcr.io/apache/kafka:4.0.0@sha256:01b9a4030e54c6068e66eb3ba4cb82c0d89238629ef1c30d79b86036bf89b1b7"
 cluster="${KIND_CLUSTER:-krabka-operator-e2e}"
@@ -43,7 +43,7 @@ capture() {
         kubectl get events -A --sort-by=.lastTimestamp >"${evidence}/events.txt"
         kubectl logs -n krabka-system -l app.kubernetes.io/name=krabka-operator \
             --all-containers --prefix >"${evidence}/operator.log"
-        kubectl logs -l app.kubernetes.io/name=crabka-rebalancer \
+        kubectl logs -l app.kubernetes.io/name=krabka-rebalancer \
             --all-containers --prefix >"${evidence}/rebalancer.log"
     fi
     jq -n \

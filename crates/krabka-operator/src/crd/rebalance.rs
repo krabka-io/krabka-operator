@@ -1,7 +1,7 @@
 //! `KafkaRebalance` CRD, in the Strimzi shape.
 //!
 //! The operator translates the spec into Connect-RPC calls against the
-//! standalone `crabka-rebalancer` service. It reports the proposal
+//! standalone `krabka-rebalancer` service. It reports the proposal
 //! lifecycle through the `status` subresource of the CRD.
 //!
 //! The workflow follows the annotation-driven state machine of Strimzi.
@@ -91,7 +91,7 @@ pub struct KafkaRebalanceSpec {
     #[schemars(with = "Option<i64>", range(min = 1))]
     pub throttle_bytes_per_sec: Option<ByteRate>,
 
-    /// Connect-RPC base URL of the `crabka-rebalancer` service, for
+    /// Connect-RPC base URL of the `krabka-rebalancer` service, for
     /// example `http://my-cluster-rebalancer.kafka.svc:9300`. When this
     /// field is absent, the operator derives
     /// `http://<cluster>-rebalancer.<namespace>.svc.cluster.local:9300`
