@@ -41,7 +41,13 @@ jobs:
       - uses: helm/kind-action@v1.15.0
         with:
           install_only: true
-      - run: docker build --tag krabka-operator:e2e --file packaging/Dockerfile .
+      # The image that this job tests is the image that it publishes. The
+      # image test and the push both build //packaging:image with `-c opt`, so
+      # they carry the same layers. (`docker load` gives the local copy a
+      # different manifest digest.) The image test loads the image into the
+      # daemon as krabka-operator:e2e, the tag that the kind test installs.
+      - name: build, load and run the operator image
+        run: bazel test -c opt --config=docker //packaging:image_docker_test --test_output=streamed
       - run: >-
           bazel test --config=docker //:kind_lifecycle_test --test_env=EVIDENCE_DIR=${RUNNER_TEMP}/operator-evidence --test_env=BROKER_IMAGE=ghcr.io/krabka-io/krabka-broker@sha256:82744b30f968b53c85545a6208aa4745e2acc12244344d0be6d84b953d61dcb0 --test_env=BROKER_REVISION=986cf6693eebf820c9088e4687a26e1934f50b9b --test_env=REBALANCER_IMAGE=ghcr.io/krabka-io/krabka-rebalancer@sha256:6479727a755cb6ae10b378f66cd44c35b22b86ee85142a91f355ea22eeb38500 --test_env=REBALANCER_REVISION=157c27c577dfb3ea1a7528f072962a5071fbbb06 --test_env=REBALANCER_CHART=${GITHUB_WORKSPACE}/.m20/rebalancer/charts/krabka-rebalancer --test_env=OPERATOR_REVISION=${GITHUB_SHA} --test_output=streamed
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -52,10 +58,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: publish tested operator image
         if: github.event_name == 'push'
-        run: |
-          image="ghcr.io/krabka-io/krabka-operator:${GITHUB_SHA}"
-          docker tag krabka-operator:e2e "${image}"
-          docker push "${image}"
+        run: bazel run -c opt //packaging:push -- --tag "${GITHUB_SHA}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
