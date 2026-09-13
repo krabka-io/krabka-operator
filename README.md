@@ -48,11 +48,8 @@ here: its controllers reached about 21k lines of storage engine across
 extracted, and it is under active development. It returns once those crates
 land in the organisation.
 
-The `Gres` and `GresTenant` manifests still ship in `charts/krabka-operator/crds`,
-because the operator owns every CRD in the `krabka.io` group. This operator does
-not reconcile those two kinds and has no Rust type for either, so
-`tools/regen-crds.sh` leaves them untouched and the drift job does not cover
-them. They come back under the generator with the Gres controllers.
+The chart does not install the `Gres` and `GresTenant` CRDs. They come back,
+from the generator, with the Gres controllers.
 
 ## Layering
 
