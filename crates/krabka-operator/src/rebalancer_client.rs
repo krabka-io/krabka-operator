@@ -1,4 +1,4 @@
-//! Connect-RPC client for the standalone `crabka-rebalancer`
+//! Connect-RPC client for the standalone `krabka-rebalancer`
 //! service.
 //!
 //! The rebalancer gives a Connect-RPC service. The unary protocol of
@@ -247,7 +247,7 @@ pub struct ConnectRebalancerClient {
     http: reqwest::Client,
 }
 
-const SERVICE_PATH: &str = "crabka.rebalancer.v1.Rebalancer";
+const SERVICE_PATH: &str = "krabka.rebalancer.v1.Rebalancer";
 
 /// Body of an `ExecuteProposal` request.
 ///
@@ -632,7 +632,7 @@ mod tests {
 
         let request = server.await.unwrap();
         assert!(
-            request.starts_with("POST /crabka.rebalancer.v1.Rebalancer/CreateProposal "),
+            request.starts_with("POST /krabka.rebalancer.v1.Rebalancer/CreateProposal "),
             "request used the wrong Connect service path"
         );
         assert!(

@@ -1,6 +1,6 @@
 //! `KafkaRebalance` reconciler.
 //!
-//! This reconciler drives the standalone `crabka-rebalancer` service through
+//! This reconciler drives the standalone `krabka-rebalancer` service through
 //! its Connect-RPC API. It reflects the proposal lifecycle into the CRD
 //! status. The state machine is Strimzi-shaped and annotation-driven:
 //!

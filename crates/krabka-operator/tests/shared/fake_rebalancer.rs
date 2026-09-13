@@ -3,7 +3,7 @@
 //! This fake records every Connect-RPC that the reconcile issues. It
 //! serves one scripted response for each method, so that a test can
 //! exercise the state machine of the controller without a live
-//! `crabka-rebalancer` process. It follows the `FakeAdminClient` pattern
+//! `krabka-rebalancer` process. It follows the `FakeAdminClient` pattern
 //! and uses `std::sync::Mutex` for interior mutability behind the `&self`
 //! trait methods.
 
