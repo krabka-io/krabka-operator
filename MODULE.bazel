@@ -10,21 +10,10 @@ module(
     version = "0.4.0",
 )
 
-bazel_dep(name = "rules_rs", version = "0.0.106")
-
-# rules_rs pins the zlib1g .deb that its rustc toolchain links against by an
-# exact Ubuntu pool URL. Ubuntu replaced 3.1ubuntu2.1 with 3.1ubuntu2.2 and
-# removed the old build from the pool. Both URLs now return 404, so a Rust
-# toolchain fetch without a warm repository cache fails during analysis. The
-# patch points the pin at the build that the pool serves. krabka-broker carries
-# the same patch. Remove it when rules_rs pins a URL that stays valid.
-single_version_override(
-    module_name = "rules_rs",
-    patch_strip = 1,
-    patches = ["//bazel/patches:rules-rs-zlib-url.patch"],
-    version = "0.0.106",
-)
-
+# 0.0.110 or later. Earlier releases fetch the zlib1g package of their rustc
+# toolchain from one archive.ubuntu.com URL, which now returns 404, so a build
+# without a warm repository cache fails in analysis. See krabka-io/tooling#7.
+bazel_dep(name = "rules_rs", version = "0.0.110")
 bazel_dep(name = "rules_rs_mutants", version = "0.0.1")
 
 # rules_rs_mutants is not published to the Bazel Central Registry, so the
@@ -90,7 +79,7 @@ bazel_dep(name = "aspect_rules_lint", version = "2.7.2")
 bazel_dep(name = "aspect_rules_lint_rust", version = "0.0.2")
 
 # See the patch header: that module registers `@default_rust_toolchains//:all`,
-# a package rules_rs 0.0.106 does not create.
+# a package rules_rs does not create.
 single_version_override(
     module_name = "aspect_rules_lint_rust",
     patch_strip = 1,
