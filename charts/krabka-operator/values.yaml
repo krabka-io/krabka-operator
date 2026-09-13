@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/robot-head/krabka-operator
+  repository: ghcr.io/krabka-io/krabka-operator
   tag: "" # defaults to .Chart.AppVersion when empty
   digest: "" # wins over tag
   pullPolicy: IfNotPresent

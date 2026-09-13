@@ -24,6 +24,14 @@ load("//tools/lint:linters.bzl", "clippy_test")
 # as part of a normal build.
 WORKSPACE_RUSTC_FLAGS = ["-Funsafe_code"]
 
+# The `[workspace.package] version` of the root `Cargo.toml`. rules_rust sets
+# `CARGO_PKG_VERSION` from the `version` attribute and uses "0.0.0" when it is
+# absent. The operator puts `CARGO_PKG_VERSION` into default image tags and
+# into `--version`, so a Bazel build without it ships an operator that asks
+# for `:0.0.0` images. `//packaging:version_test` fails when this
+# value and `Cargo.toml` differ.
+WORKSPACE_VERSION = "0.4.0"
+
 def _features():
     return DEP_DATA[native.package_name()]["crate_features"]
 
@@ -117,6 +125,7 @@ def crate_library(
         crate_features = _features(),
         crate_name = crate_name(),
         edition = edition(),
+        version = WORKSPACE_VERSION,
         rustc_flags = WORKSPACE_RUSTC_FLAGS,
         visibility = ["//visibility:public"],
         deps = deps,
@@ -164,6 +173,7 @@ def crate_binary(name, crate_root, lib = None, srcs = None, tests = True, **kwar
         crate_features = _features(),
         crate_root = crate_root,
         edition = edition(),
+        version = WORKSPACE_VERSION,
         rustc_flags = WORKSPACE_RUSTC_FLAGS,
         visibility = ["//visibility:public"],
         deps = all_crate_deps(normal = True) + ([lib] if lib else []),
@@ -177,6 +187,7 @@ def crate_binary(name, crate_root, lib = None, srcs = None, tests = True, **kwar
             crate = ":" + name,
             crate_features = _features(),
             edition = edition(),
+            version = WORKSPACE_VERSION,
             rustc_flags = WORKSPACE_RUSTC_FLAGS,
             deps = all_crate_deps(normal_dev = True),
         )
@@ -230,6 +241,7 @@ def crate_tests(
         crate_features = _features(),
         data = data or [],
         edition = edition(),
+        version = WORKSPACE_VERSION,
         env = env,
         rustc_env = rustc_env,
         rustc_flags = WORKSPACE_RUSTC_FLAGS,
@@ -281,6 +293,7 @@ def crate_tests(
             crate_features = _features(),
             data = data or [],
             edition = edition(),
+            version = WORKSPACE_VERSION,
             env = env,
             rustc_env = rustc_env,
             rustc_flags = WORKSPACE_RUSTC_FLAGS,

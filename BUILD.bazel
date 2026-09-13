@@ -23,11 +23,8 @@ alias(
 sh_test(
     name = "kind_lifecycle_test",
     size = "enormous",
-    srcs = ["packaging/kind-lifecycle.sh"],
-    data = ["Cargo.toml"] + glob([
-        "charts/krabka-operator/**",
-        "packaging/Dockerfile",
-    ]),
+    srcs = ["//packaging:kind-lifecycle.sh"],
+    data = ["Cargo.toml"] + glob(["charts/krabka-operator/**"]),
     tags = [
         "docker",
         "external",
