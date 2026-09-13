@@ -674,7 +674,7 @@ mod tests {
             "my-gateway",
             KafkaGrpcGatewaySpec {
                 replicas: Some(2),
-                image: Some("ghcr.io/krabka-io/krabka-operator-grpc-gateway:latest".into()),
+                image: Some("ghcr.io/krabka-io/krabka-gateway:v0.4.0".into()),
                 resources: None,
                 dedup: Some(DedupSpec {
                     topic: Some("my-gateway-dedup".into()),

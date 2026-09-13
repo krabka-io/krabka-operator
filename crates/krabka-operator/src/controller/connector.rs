@@ -32,10 +32,7 @@ use crate::{
 const APP_NAME: &str = "krabka-connect-worker";
 const HEALTH_PORT: i32 = 8080;
 const HEALTH_ADDR: &str = "0.0.0.0:8080";
-const DEFAULT_IMAGE: &str = concat!(
-    "ghcr.io/krabka-io/krabka-operator-connect-worker:",
-    env!("CARGO_PKG_VERSION")
-);
+const DEFAULT_IMAGE: &str = crate::controller::component_images::CONNECT_WORKER_IMAGE;
 const CHECKPOINT_TOPIC: &str = "__krabka_connect_offsets";
 const CHECKPOINT_READER_GROUP: &str = "krabka-replicator-reader-__krabka_connect_offsets";
 const BROKER_CLIENT_DIR: &str = "/etc/krabka/broker-client";

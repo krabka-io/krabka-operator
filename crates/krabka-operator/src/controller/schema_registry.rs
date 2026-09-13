@@ -58,10 +58,7 @@ const DEFAULT_ELECTION_REBALANCE_TIMEOUT: Time = secs(30);
 const DEFAULT_ELECTION_HEARTBEAT_INTERVAL: Time = secs(3);
 const DEFAULT_STARTUP_PERIOD_SECONDS: i32 = 5;
 const DEFAULT_STARTUP_FAILURE_THRESHOLD: i32 = 60;
-const DEFAULT_IMAGE: &str = concat!(
-    "ghcr.io/krabka-io/krabka-operator-schema-registry:",
-    env!("CARGO_PKG_VERSION")
-);
+const DEFAULT_IMAGE: &str = crate::controller::component_images::SCHEMA_REGISTRY_IMAGE;
 
 /// # Errors
 ///
