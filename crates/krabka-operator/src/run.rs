@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use krabka_units::{Time, convert::TimeExt as _};
 use kube::Client;
 use tokio::task::JoinSet;
 
@@ -23,7 +22,7 @@ use crate::{
     context::Context,
     controller,
     health::{self, HealthState, Phase},
-    leader_election::{self, Leadership, Release},
+    leader_election::{self, Release},
     telemetry,
 };
 
@@ -99,18 +98,39 @@ pub async fn run(config: OperatorConfig) -> anyhow::Result<()> {
             Ok(Err(e)) => tracing::error!(error = %e, "health server exited with error"),
             Err(e) => tracing::error!(error = %e, "health task panicked"),
         },
-        () = controllers.first_exit() => {}
+        Some(exit) = controllers.first_exit() => match exit.error {
+            None => tracing::info!(controller = exit.controller, "controller exited"),
+            Some(error) => tracing::error!(controller = exit.controller, %error, "controller exited with error"),
+        },
         () = shutdown_signal() => tracing::info!("shutdown signal received"),
     }
     health_state.advance(Phase::Stopping);
     // Stop every controller before the lease goes back, so that this replica
-    // and the next leader never reconcile at the same time.
-    controllers.tasks.shutdown().await;
-    release(leadership, lease_duration).await;
+    // and the next leader never reconcile at the same time. The lease expires
+    // on its own after its duration, so the release waits no longer.
+    controllers.stop().await;
+    match leadership.release(lease_duration).await {
+        Ok(Release::Released) => tracing::info!("released the leader-election lease"),
+        Ok(Release::NotHeld) => {
+            tracing::info!("leader-election lease is not held; nothing to release")
+        }
+        Ok(Release::Conflict) => {
+            tracing::warn!("leader-election lease changed during the release; left as it is")
+        }
+        Err(error) => tracing::warn!(%error, "leader-election lease not released; it expires"),
+    }
     Ok(())
 }
 
-/// The controller tasks, with the name of each task for the log.
+/// How one controller task ended.
+#[derive(Debug, PartialEq, Eq)]
+struct ControllerExit {
+    controller: &'static str,
+    /// `None` if the controller returned `Ok`.
+    error: Option<String>,
+}
+
+/// The controller tasks, with the name of each task.
 #[derive(Default)]
 struct Controllers {
     tasks: JoinSet<anyhow::Result<()>>,
@@ -127,38 +147,22 @@ impl Controllers {
         self.names.insert(id, name);
     }
 
-    /// Wait until one controller ends, and log how it ended.
-    async fn first_exit(&mut self) {
-        let Some(joined) = self.tasks.join_next_with_id().await else {
-            return;
+    /// Wait until one controller ends. `None` if no controller runs.
+    async fn first_exit(&mut self) -> Option<ControllerExit> {
+        let (id, error) = match self.tasks.join_next_with_id().await? {
+            Ok((id, result)) => (id, result.err().map(|error| error.to_string())),
+            Err(error) if error.is_panic() => (error.id(), Some("the task panicked".to_owned())),
+            Err(error) => (error.id(), Some("the task was cancelled".to_owned())),
         };
-        let (id, result) = match joined {
-            Ok((id, result)) => (id, result.map_err(|error| error.to_string())),
-            Err(error) => (error.id(), Err(format!("task panicked: {error}"))),
-        };
-        let controller = self.names.get(&id).copied().unwrap_or("unknown");
-        match result {
-            Ok(()) => tracing::info!(controller, "controller exited"),
-            Err(error) => tracing::error!(controller, %error, "controller exited with error"),
-        }
+        Some(ControllerExit {
+            controller: self.names.get(&id).copied().unwrap_or("unknown"),
+            error,
+        })
     }
-}
 
-/// Give the lease back after the controllers stop. The lease expires on its
-/// own after `lease_duration`, so the process does not wait longer than that.
-async fn release(leadership: Leadership, lease_duration: Time) {
-    match tokio::time::timeout(lease_duration.to_std(), leadership.release()).await {
-        Ok(Ok(Release::Released)) => tracing::info!("released the leader-election lease"),
-        Ok(Ok(Release::NotHeld)) => {
-            tracing::info!("leader-election lease is not held; nothing to release");
-        }
-        Ok(Ok(Release::Conflict)) => {
-            tracing::warn!("leader-election lease changed during the release; left as it is");
-        }
-        Ok(Err(error)) => {
-            tracing::warn!(%error, "could not release the leader-election lease; it expires");
-        }
-        Err(_) => tracing::warn!("leader-election lease release timed out; the lease expires"),
+    /// Cancel all controllers, and wait until each task has stopped.
+    async fn stop(mut self) {
+        self.tasks.shutdown().await;
     }
 }
 
@@ -179,5 +183,62 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = ctrl_c.await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use assert2::assert;
+    use tokio::sync::oneshot;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn first_exit_names_the_controller_that_ended() {
+        enum End {
+            Ok,
+            Err,
+            Panic,
+        }
+        let cases = [
+            (End::Ok, None),
+            (End::Err, Some("watch stream ended".to_owned())),
+            (End::Panic, Some("the task panicked".to_owned())),
+        ];
+        for (end, error) in cases {
+            let mut controllers = Controllers::default();
+            controllers.spawn("Idle", std::future::pending());
+            controllers.spawn("Ending", async move {
+                match end {
+                    End::Ok => Ok(()),
+                    End::Err => Err(anyhow::anyhow!("watch stream ended")),
+                    End::Panic => panic!("controller bug"),
+                }
+            });
+            let expected = ControllerExit {
+                controller: "Ending",
+                error,
+            };
+            assert!(controllers.first_exit().await == Some(expected));
+        }
+    }
+
+    #[tokio::test]
+    async fn first_exit_without_controllers_is_none() {
+        assert!(Controllers::default().first_exit().await == None);
+    }
+
+    #[tokio::test]
+    async fn stop_ends_every_running_controller() {
+        let mut controllers = Controllers::default();
+        let (guard, stopped) = oneshot::channel::<()>();
+        controllers.spawn("Idle", async move {
+            // The task holds the sender until it is dropped.
+            let _guard = guard;
+            std::future::pending().await
+        });
+        controllers.stop().await;
+        // The sender is dropped, so the receiver sees a closed channel.
+        assert!(stopped.await.is_err());
     }
 }
