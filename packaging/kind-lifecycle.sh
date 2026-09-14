@@ -98,16 +98,22 @@ helm install krabka-operator "${root}/charts/krabka-operator" \
     --set image.pullPolicy=Never \
     "${broker_values[@]}"
 
-# Roll the operator Deployment once (issue #49). The chart rolls with
+# Roll the operator Deployment once (issues #49 and #52). The chart rolls with
 # maxUnavailable 0, so the old pod stops only after the new pod is Ready. The
-# old pod holds the leader lease until it stops. The new pod must get Ready
-# in standby, and it must take the lease after the old pod stops. The Kafka
-# steps below then run against the new leader.
+# new pod gets Ready in standby. The old pod holds the leader lease until it
+# stops, and then it releases the lease. The new pod must take the lease on its
+# next retry, well before the lease would expire. The Kafka steps below then
+# run against the new leader.
 operator_pods=(-n krabka-system -l app.kubernetes.io/name=krabka-operator,app.kubernetes.io/component=operator)
 old_operator_pod="$(kubectl get pods "${operator_pods[@]}" -o jsonpath='{.items[0].metadata.name}')"
 kubectl wait -n krabka-system --for=create lease/krabka-operator-leader --timeout=2m
 kubectl wait -n krabka-system lease/krabka-operator-leader \
     --for=jsonpath='{.spec.holderIdentity}'="${old_operator_pod}" --timeout=2m
+# Record each version of the lease during the rollout.
+lease_watch="${evidence}/operator-lease-watch.json"
+kubectl get lease -n krabka-system krabka-operator-leader -o json --watch >"${lease_watch}" &
+lease_watch_pid=$!
+upgrade_started_ms="$(($(date +%s%N) / 1000000))"
 helm upgrade krabka-operator "${root}/charts/krabka-operator" \
     --namespace krabka-system --reuse-values --wait --timeout 5m \
     --set-string podAnnotations.krabka-lifecycle-rollout=second
@@ -116,8 +122,39 @@ new_operator_pod="$(kubectl get pods "${operator_pods[@]}" -o jsonpath='{.items[
 [[ -n "${new_operator_pod}" && "${new_operator_pod}" != "${old_operator_pod}" ]]
 kubectl wait -n krabka-system lease/krabka-operator-leader \
     --for=jsonpath='{.spec.holderIdentity}'="${new_operator_pod}" --timeout=2m
-printf 'old_pod=%s\nnew_pod=%s\n' "${old_operator_pod}" "${new_operator_pod}" \
-    >"${evidence}/operator-rollout.txt"
+# The handover is the time from the last write of the old pod (its release, or
+# its last renewal) to the acquisition by the new pod. Both pods write their own
+# clock, and in kind that is the clock of one host.
+handover_query='
+    def ms: capture("^(?<s>[^.Z]+)(\\.(?<f>[0-9]+))?Z$")
+        | (.s + "Z" | fromdateiso8601) * 1000 + (((.f // "") + "000")[0:3] | tonumber);
+    map(.spec) as $versions
+    | ($versions | map(.holderIdentity == $new) | index(true)) as $taken
+    | select($taken != null and $taken > 0)
+    | $versions[$taken - 1] as $before
+    | select(($before.holderIdentity // "") as $h | $h == $old or $h == "")
+    | [($versions[$taken].acquireTime | ms) - ($before.renewTime | ms),
+       ($versions[$taken].acquireTime | ms),
+       $versions[$taken].leaseDurationSeconds]
+    | @tsv'
+handover=
+for _ in $(seq 1 50); do
+    handover="$(jq -rs --arg old "${old_operator_pod}" --arg new "${new_operator_pod}" \
+        "${handover_query}" "${lease_watch}" 2>/dev/null || true)"
+    [[ -n "${handover}" ]] && break
+    sleep 0.2
+done
+kill "${lease_watch_pid}"
+wait "${lease_watch_pid}" || true
+[[ -n "${handover}" ]]
+read -r handover_ms acquired_ms lease_duration_seconds <<<"${handover}"
+printf 'old_pod=%s\nnew_pod=%s\nhandover_ms=%s\nupgrade_to_lease_ms=%s\n' \
+    "${old_operator_pod}" "${new_operator_pod}" "${handover_ms}" \
+    "$((acquired_ms - upgrade_started_ms))" | tee "${evidence}/operator-rollout.txt"
+# A lease that expires instead gives a handover of about the lease duration.
+# The new pod retries every 2 s, so half the lease duration leaves room for a
+# slow runner.
+((handover_ms >= 0 && handover_ms < lease_duration_seconds * 1000 / 2))
 
 kubectl apply -f - <<EOF
 apiVersion: krabka.io/v1alpha1
