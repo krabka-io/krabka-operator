@@ -3,7 +3,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: {{ include "krabka-operator.fullname" . }}-ca-renewal
-  labels: {{- include "krabka-operator.labels" . | nindent 4 }}
+  labels: {{- include "krabka-operator.caRenewalLabels" . | nindent 4 }}
 spec:
   schedule: {{ .Values.caRenewal.schedule | quote }}
   startingDeadlineSeconds: {{ .Values.caRenewal.startingDeadlineSeconds }}
@@ -15,7 +15,7 @@ spec:
       backoffLimit: 0
       template:
         metadata:
-          labels: {{- include "krabka-operator.selectorLabels" . | nindent 12 }}
+          labels: {{- include "krabka-operator.caRenewalSelectorLabels" . | nindent 12 }}
         spec:
           serviceAccountName: {{ include "krabka-operator.fullname" . }}-ca-renewal
           restartPolicy: Never
