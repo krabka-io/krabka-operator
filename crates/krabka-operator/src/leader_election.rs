@@ -20,9 +20,26 @@ fn lease_duration_seconds(extent: Time) -> anyhow::Result<i32> {
     i32::try_from(extent.secs_i64()).map_err(Into::into)
 }
 
+/// The result of [`Leadership::release`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Release {
+    /// This replica held the lease. The update cleared the holder, so a
+    /// standby replica takes the lease on its next retry.
+    Released,
+    /// The lease does not exist, or another replica holds it. The release
+    /// did not change the lease.
+    NotHeld,
+    /// The lease changed between the read and the update. The release did not
+    /// change the lease, so it cannot overwrite a new holder.
+    Conflict,
+}
+
 /// A held Kubernetes lease. Its background task renews the lease until
-/// leadership is lost or the guard is dropped.
+/// leadership is lost, the holder releases the lease, or the guard is dropped.
 pub struct Leadership {
+    api: Api<Lease>,
+    name: String,
+    identity: String,
     renewer: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
@@ -36,6 +53,28 @@ impl Leadership {
         (&mut self.renewer)
             .await
             .map_err(|error| anyhow::anyhow!("leader-election renewal task failed: {error}"))?
+    }
+
+    /// Stop the renewal and give the lease back. A standby replica then takes
+    /// the lease on its next retry. It does not wait for the lease to expire.
+    ///
+    /// Call this after the controllers stop, so that two replicas never
+    /// reconcile at the same time. The update is optimistic: it carries the
+    /// `resourceVersion` of the lease that it read. A replica that lost the
+    /// lease therefore cannot overwrite the new holder. This is the
+    /// `ReleaseOnCancel` behavior of client-go.
+    ///
+    /// # Errors
+    ///
+    /// Returns the Kubernetes API error if the read or the update of the lease
+    /// fails for a reason other than a conflict.
+    pub async fn release(mut self) -> Result<Release, kube::Error> {
+        self.renewer.abort();
+        // The renewal can end with a cancel, a lost lease, or a missed
+        // deadline. The read in `release_lease` finds the true holder in each
+        // case, so the result of the renewal is not necessary here.
+        drop((&mut self.renewer).await);
+        release_lease(&self.api, &self.name, &self.identity, now()).await
     }
 }
 
@@ -95,11 +134,11 @@ pub async fn acquire(
                     tracing::info!(%name, %identity, "re-confirmed lease ownership");
                     break;
                 }
-                if is_expired(&existing, lease_duration) {
+                if is_claimable(&existing, lease_duration) {
                     claim(&mut existing, identity, lease_duration_seconds);
                     match api.replace(name, &PostParams::default(), &existing).await {
                         Ok(_) => {
-                            tracing::info!(%name, %identity, "acquired expired lease");
+                            tracing::info!(%name, %identity, "acquired released or expired lease");
                             break;
                         }
                         Err(kube::Error::Api(error)) if error.code == 409 => {
@@ -116,20 +155,61 @@ pub async fn acquire(
         }
     }
 
-    let renew_name = name.to_owned();
-    let renew_identity = identity.to_owned();
-    let renewer = tokio::spawn(async move {
-        renew_loop(
-            api,
-            renew_name,
-            renew_identity,
-            lease_duration,
-            retry_interval,
-            lease_duration_seconds,
-        )
-        .await
-    });
-    Ok(Leadership { renewer })
+    let renewer = tokio::spawn(renew_loop(
+        api.clone(),
+        name.to_owned(),
+        identity.to_owned(),
+        lease_duration,
+        retry_interval,
+        lease_duration_seconds,
+    ));
+    Ok(Leadership {
+        api,
+        name: name.to_owned(),
+        identity: identity.to_owned(),
+        renewer,
+    })
+}
+
+/// Clear the holder of the lease `name` if `identity` holds it. The update
+/// carries the `resourceVersion` of the read, so a concurrent change makes
+/// the API server refuse it with 409.
+async fn release_lease(
+    api: &Api<Lease>,
+    name: &str,
+    identity: &str,
+    now: jiff::Timestamp,
+) -> Result<Release, kube::Error> {
+    let Some(lease) = api.get_opt(name).await? else {
+        return Ok(Release::NotHeld);
+    };
+    let Some(released) = released(&lease, identity, now) else {
+        return Ok(Release::NotHeld);
+    };
+    match api.replace(name, &PostParams::default(), &released).await {
+        Ok(_) => Ok(Release::Released),
+        Err(kube::Error::Api(status)) if status.code == 409 => Ok(Release::Conflict),
+        Err(error) => Err(error),
+    }
+}
+
+/// The lease to write back when `identity` releases `lease`, or `None` if
+/// `identity` does not hold it.
+///
+/// The holder is cleared and the lease duration is 1 second, as client-go
+/// does. The metadata, and with it the `resourceVersion`, stays as it was
+/// read. The transition count stays too: the next holder adds one.
+fn released(lease: &Lease, identity: &str, now: jiff::Timestamp) -> Option<Lease> {
+    if !held_by_us(lease, identity) {
+        return None;
+    }
+    let mut released = lease.clone();
+    let spec = released.spec.get_or_insert_with(LeaseSpec::default);
+    spec.holder_identity = None;
+    spec.lease_duration_seconds = Some(1);
+    spec.acquire_time = Some(MicroTime(now));
+    spec.renew_time = Some(MicroTime(now));
+    Some(released)
 }
 
 fn claim(lease: &mut Lease, identity: &str, lease_duration_seconds: i32) {
@@ -212,6 +292,21 @@ fn held_by_us(lease: &Lease, identity: &str) -> bool {
         == Some(identity)
 }
 
+/// Whether another replica can take `lease` now: it has no holder, or its
+/// holder did not renew it in time.
+fn is_claimable(lease: &Lease, fallback_duration: Time) -> bool {
+    is_vacant(lease) || is_expired(lease, fallback_duration)
+}
+
+/// Whether `lease` has no holder. A released lease has none.
+fn is_vacant(lease: &Lease) -> bool {
+    lease
+        .spec
+        .as_ref()
+        .and_then(|spec| spec.holder_identity.as_deref())
+        .is_none_or(str::is_empty)
+}
+
 fn is_expired(lease: &Lease, fallback_duration: Time) -> bool {
     let Some(spec) = lease.spec.as_ref() else {
         return true;
@@ -228,10 +323,197 @@ fn is_expired(lease: &Lease, fallback_duration: Time) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use assert2::assert;
+    use http::{Method, Request, Response};
+    use http_body_util::BodyExt as _;
     use krabka_units::secs;
 
     use super::*;
+
+    const NAMESPACE: &str = "krabka-system";
+    const LEASE: &str = "krabka-operator-leader";
+    const LEASE_PATH: &str =
+        "/apis/coordination.k8s.io/v1/namespaces/krabka-system/leases/krabka-operator-leader";
+
+    /// One request that the mock API server received: the method, the path,
+    /// and the lease in the body, if the body holds one.
+    type Observed = (Method, String, Option<Lease>);
+
+    /// A Lease API whose server answers each request with the next of
+    /// `responses`, as a status code and a JSON body. The second value
+    /// collects the requests.
+    fn scripted_api(
+        responses: Vec<(u16, serde_json::Value)>,
+    ) -> (Api<Lease>, Arc<Mutex<Vec<Observed>>>) {
+        let responses = Arc::new(Mutex::new(responses.into_iter()));
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let seen = observed.clone();
+        let service = tower::service_fn(move |request: Request<kube::client::Body>| {
+            let responses = responses.clone();
+            let seen = seen.clone();
+            async move {
+                let (parts, body) = request.into_parts();
+                let bytes = body.collect().await.unwrap().to_bytes();
+                let lease = serde_json::from_slice::<Lease>(&bytes).ok();
+                seen.lock()
+                    .unwrap()
+                    .push((parts.method, parts.uri.path().to_owned(), lease));
+                let (status, body) = responses
+                    .lock()
+                    .unwrap()
+                    .next()
+                    .expect("the script has a response for each request");
+                let response = Response::builder()
+                    .status(status)
+                    .header("content-type", "application/json")
+                    .body(kube::client::Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap();
+                Ok::<_, kube::Error>(response)
+            }
+        });
+        let client = Client::new(service, NAMESPACE);
+        (Api::namespaced(client, NAMESPACE), observed)
+    }
+
+    fn status_body(code: u16, reason: &str) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "Status",
+            "apiVersion": "v1",
+            "status": "Failure",
+            "code": code,
+            "reason": reason,
+            "message": reason,
+        })
+    }
+
+    fn stored_lease(holder: Option<&str>, renew: jiff::Timestamp) -> Lease {
+        Lease {
+            metadata: ObjectMeta {
+                name: Some(LEASE.into()),
+                namespace: Some(NAMESPACE.into()),
+                resource_version: Some("41".into()),
+                ..Default::default()
+            },
+            spec: Some(LeaseSpec {
+                holder_identity: holder.map(Into::into),
+                lease_duration_seconds: Some(15),
+                acquire_time: Some(MicroTime(renew)),
+                renew_time: Some(MicroTime(renew)),
+                lease_transitions: Some(3),
+                ..Default::default()
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn release_clears_the_holder_only_with_an_unchanged_lease() {
+        struct Case {
+            name: &'static str,
+            responses: Vec<(u16, serde_json::Value)>,
+            outcome: Result<Release, u16>,
+            put: bool,
+        }
+
+        let renewed = jiff::Timestamp::from_second(1_800_000_000).unwrap();
+        let now = jiff::Timestamp::from_second(1_800_000_005).unwrap();
+        let ours = serde_json::to_value(stored_lease(Some("me"), renewed)).unwrap();
+        let theirs = serde_json::to_value(stored_lease(Some("other"), renewed)).unwrap();
+        let vacant = serde_json::to_value(stored_lease(None, renewed)).unwrap();
+        // The update that a release sends: no holder, a 1 s duration, both
+        // times at `now`, and the resourceVersion and transition count of the
+        // read.
+        let released = Lease {
+            metadata: ObjectMeta {
+                name: Some(LEASE.into()),
+                namespace: Some(NAMESPACE.into()),
+                resource_version: Some("41".into()),
+                ..Default::default()
+            },
+            spec: Some(LeaseSpec {
+                holder_identity: None,
+                lease_duration_seconds: Some(1),
+                acquire_time: Some(MicroTime(now)),
+                renew_time: Some(MicroTime(now)),
+                lease_transitions: Some(3),
+                ..Default::default()
+            }),
+        };
+
+        let cases = [
+            Case {
+                name: "holds the lease and releases it",
+                responses: vec![(200, ours.clone()), (200, ours.clone())],
+                outcome: Ok(Release::Released),
+                put: true,
+            },
+            Case {
+                name: "another replica took the lease",
+                responses: vec![(200, theirs)],
+                outcome: Ok(Release::NotHeld),
+                put: false,
+            },
+            Case {
+                name: "the lease has no holder",
+                responses: vec![(200, vacant)],
+                outcome: Ok(Release::NotHeld),
+                put: false,
+            },
+            Case {
+                name: "the lease was deleted",
+                responses: vec![(404, status_body(404, "NotFound"))],
+                outcome: Ok(Release::NotHeld),
+                put: false,
+            },
+            Case {
+                name: "the lease changed between the read and the update",
+                responses: vec![(200, ours.clone()), (409, status_body(409, "Conflict"))],
+                outcome: Ok(Release::Conflict),
+                put: true,
+            },
+            Case {
+                name: "the update fails for another reason",
+                responses: vec![(200, ours), (500, status_body(500, "InternalError"))],
+                outcome: Err(500),
+                put: true,
+            },
+        ];
+
+        for case in cases {
+            let (api, observed) = scripted_api(case.responses);
+            let outcome =
+                release_lease(&api, LEASE, "me", now)
+                    .await
+                    .map_err(|error| match error {
+                        kube::Error::Api(status) => status.code,
+                        other => panic!("{}: unexpected error {other}", case.name),
+                    });
+            let mut expected = vec![(Method::GET, LEASE_PATH.to_owned(), None)];
+            if case.put {
+                expected.push((Method::PUT, LEASE_PATH.to_owned(), Some(released.clone())));
+            }
+            let name = case.name;
+            assert!(outcome == case.outcome, "{name}");
+            assert!(*observed.lock().unwrap() == expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn only_a_vacant_or_expired_lease_is_claimable() {
+        let fresh = now();
+        let stale = jiff::Timestamp::from_second(fresh.as_second() - 60).unwrap();
+        let cases = [
+            ("held and renewed", Some("other"), fresh, false),
+            ("held and not renewed in time", Some("other"), stale, true),
+            ("released, holder absent", None, fresh, true),
+            ("released, holder empty", Some(""), fresh, true),
+        ];
+        for (name, holder, renew, claimable) in cases {
+            let lease = stored_lease(holder, renew);
+            assert!(is_claimable(&lease, secs(15)) == claimable, "{name}");
+        }
+    }
 
     fn lease_with(holder: &str, renew: jiff::Timestamp) -> Lease {
         Lease {

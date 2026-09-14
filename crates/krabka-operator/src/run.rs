@@ -7,16 +7,24 @@
 //!
 //! The process moves through the [`Phase`] values. It is ready in
 //! [`Phase::Standby`], while it waits for the lease, and it starts the
-//! controllers only in [`Phase::Leading`].
+//! controllers only in [`Phase::Leading`]. On a shutdown signal, or when a
+//! controller or the health server ends, it stops the controllers and then
+//! releases the lease, so that a standby replica takes over at once. A
+//! replica that lost the lease does not release it.
 
+use std::collections::HashMap;
+
+use krabka_units::{Time, convert::TimeExt as _};
 use kube::Client;
+use tokio::task::JoinSet;
 
 use crate::{
     config::OperatorConfig,
     context::Context,
     controller,
     health::{self, HealthState, Phase},
-    leader_election, telemetry,
+    leader_election::{self, Leadership, Release},
+    telemetry,
 };
 
 /// Run the operator. See the module docs for the supervision shape.
@@ -60,42 +68,26 @@ pub async fn run(config: OperatorConfig) -> anyhow::Result<()> {
     )
     .await?;
 
+    let lease_duration = config.leader_lease_duration;
     let ctx = Context::new(client, config, registry, metrics);
     health_state.advance(Phase::Leading);
     tracing::info!("leading; starting the controllers");
 
-    let kafka_handle = tokio::spawn({
-        let ctx = ctx.clone();
-        async move { controller::kafka::run(ctx).await }
-    });
-    let pool_handle = tokio::spawn({
-        let ctx = ctx.clone();
-        async move { controller::kafka_node_pool::run(ctx).await }
-    });
-    let topic_handle = tokio::spawn({
-        let ctx = ctx.clone();
-        async move { controller::topic::run(ctx).await }
-    });
-    let user_handle = tokio::spawn({
-        let ctx = ctx.clone();
-        async move { controller::user::run(ctx).await }
-    });
-    let rebalance_handle = tokio::spawn({
-        let ctx = ctx.clone();
-        async move { controller::rebalance::run(ctx).await }
-    });
-    let grpc_gateway_handle = tokio::spawn({
-        let ctx = ctx.clone();
-        async move { controller::grpc_gateway::run(ctx).await }
-    });
-    let connector_handle = tokio::spawn({
-        let ctx = ctx.clone();
-        async move { controller::connector::run(ctx).await }
-    });
-    let schema_registry_handle = tokio::spawn({
-        let ctx = ctx.clone();
-        async move { controller::schema_registry::run(ctx).await }
-    });
+    let mut controllers = Controllers::default();
+    controllers.spawn("Kafka", controller::kafka::run(ctx.clone()));
+    controllers.spawn(
+        "KafkaNodePool",
+        controller::kafka_node_pool::run(ctx.clone()),
+    );
+    controllers.spawn("KafkaTopic", controller::topic::run(ctx.clone()));
+    controllers.spawn("KafkaUser", controller::user::run(ctx.clone()));
+    controllers.spawn("KafkaRebalance", controller::rebalance::run(ctx.clone()));
+    controllers.spawn(
+        "KafkaGrpcGateway",
+        controller::grpc_gateway::run(ctx.clone()),
+    );
+    controllers.spawn("KafkaConnector", controller::connector::run(ctx.clone()));
+    controllers.spawn("SchemaRegistry", controller::schema_registry::run(ctx));
 
     tokio::select! {
         res = leadership.wait() => {
@@ -107,50 +99,67 @@ pub async fn run(config: OperatorConfig) -> anyhow::Result<()> {
             Ok(Err(e)) => tracing::error!(error = %e, "health server exited with error"),
             Err(e) => tracing::error!(error = %e, "health task panicked"),
         },
-        res = kafka_handle => match res {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!(error = %e, "Kafka controller exited with error"),
-            Err(e) => tracing::error!(error = %e, "Kafka controller task panicked"),
-        },
-        res = pool_handle => match res {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!(error = %e, "KafkaNodePool controller exited with error"),
-            Err(e) => tracing::error!(error = %e, "KafkaNodePool controller task panicked"),
-        },
-        res = topic_handle => match res {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!(error = %e, "KafkaTopic controller exited with error"),
-            Err(e) => tracing::error!(error = %e, "KafkaTopic controller task panicked"),
-        },
-        res = user_handle => match res {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!(error = %e, "KafkaUser controller exited with error"),
-            Err(e) => tracing::error!(error = %e, "KafkaUser controller task panicked"),
-        },
-        res = rebalance_handle => match res {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!(error = %e, "KafkaRebalance controller exited with error"),
-            Err(e) => tracing::error!(error = %e, "KafkaRebalance controller task panicked"),
-        },
-        res = grpc_gateway_handle => match res {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!(error = %e, "KafkaGrpcGateway controller exited with error"),
-            Err(e) => tracing::error!(error = %e, "KafkaGrpcGateway controller task panicked"),
-        },
-        res = connector_handle => match res {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!(error = %e, "KafkaConnector controller exited with error"),
-            Err(e) => tracing::error!(error = %e, "KafkaConnector controller task panicked"),
-        },
-        res = schema_registry_handle => match res {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!(error = %e, "SchemaRegistry controller exited with error"),
-            Err(e) => tracing::error!(error = %e, "SchemaRegistry controller task panicked"),
-        },
+        () = controllers.first_exit() => {}
         () = shutdown_signal() => tracing::info!("shutdown signal received"),
     }
     health_state.advance(Phase::Stopping);
+    // Stop every controller before the lease goes back, so that this replica
+    // and the next leader never reconcile at the same time.
+    controllers.tasks.shutdown().await;
+    release(leadership, lease_duration).await;
     Ok(())
+}
+
+/// The controller tasks, with the name of each task for the log.
+#[derive(Default)]
+struct Controllers {
+    tasks: JoinSet<anyhow::Result<()>>,
+    names: HashMap<tokio::task::Id, &'static str>,
+}
+
+impl Controllers {
+    fn spawn(
+        &mut self,
+        name: &'static str,
+        controller: impl Future<Output = anyhow::Result<()>> + Send + 'static,
+    ) {
+        let id = self.tasks.spawn(controller).id();
+        self.names.insert(id, name);
+    }
+
+    /// Wait until one controller ends, and log how it ended.
+    async fn first_exit(&mut self) {
+        let Some(joined) = self.tasks.join_next_with_id().await else {
+            return;
+        };
+        let (id, result) = match joined {
+            Ok((id, result)) => (id, result.map_err(|error| error.to_string())),
+            Err(error) => (error.id(), Err(format!("task panicked: {error}"))),
+        };
+        let controller = self.names.get(&id).copied().unwrap_or("unknown");
+        match result {
+            Ok(()) => tracing::info!(controller, "controller exited"),
+            Err(error) => tracing::error!(controller, %error, "controller exited with error"),
+        }
+    }
+}
+
+/// Give the lease back after the controllers stop. The lease expires on its
+/// own after `lease_duration`, so the process does not wait longer than that.
+async fn release(leadership: Leadership, lease_duration: Time) {
+    match tokio::time::timeout(lease_duration.to_std(), leadership.release()).await {
+        Ok(Ok(Release::Released)) => tracing::info!("released the leader-election lease"),
+        Ok(Ok(Release::NotHeld)) => {
+            tracing::info!("leader-election lease is not held; nothing to release");
+        }
+        Ok(Ok(Release::Conflict)) => {
+            tracing::warn!("leader-election lease changed during the release; left as it is");
+        }
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "could not release the leader-election lease; it expires");
+        }
+        Err(_) => tracing::warn!("leader-election lease release timed out; the lease expires"),
+    }
 }
 
 /// Resolve when SIGINT arrives, or when SIGTERM arrives on Unix. Kubernetes
