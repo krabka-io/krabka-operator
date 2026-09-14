@@ -1,0 +1,68 @@
+# A label selector matches a pod when the pod has each selector label. The
+# operator Deployment and Service must select the operator pods only. The
+# CA-renewal Job pods belong to the same release, so they must not have all the
+# operator selector labels.
+suite: workload selectors
+templates:
+  - deployment.yaml
+  - service.yaml
+  - servicemonitor.yaml
+  - cronjob-ca-renewal.yaml
+release:
+  name: demo
+  namespace: krabka-system
+set:
+  serviceMonitor.enabled: true
+tests:
+  - it: the Deployment selects the operator pods that it creates
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: krabka-operator
+            app.kubernetes.io/instance: demo
+            app.kubernetes.io/component: operator
+      - isSubset:
+          path: spec.template.metadata.labels
+          content:
+            app.kubernetes.io/name: krabka-operator
+            app.kubernetes.io/instance: demo
+            app.kubernetes.io/component: operator
+
+  - it: the Service selects the operator pods
+    template: service.yaml
+    asserts:
+      - equal:
+          path: spec.selector
+          value:
+            app.kubernetes.io/name: krabka-operator
+            app.kubernetes.io/instance: demo
+            app.kubernetes.io/component: operator
+
+  - it: the ServiceMonitor selects the operator Service
+    template: servicemonitor.yaml
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: krabka-operator
+            app.kubernetes.io/instance: demo
+            app.kubernetes.io/component: operator
+
+  - it: the CA-renewal Job pods are outside the Deployment and Service selectors
+    template: cronjob-ca-renewal.yaml
+    asserts:
+      - equal:
+          path: spec.jobTemplate.spec.template.metadata.labels
+          value:
+            app.kubernetes.io/name: krabka-operator
+            app.kubernetes.io/instance: demo
+            app.kubernetes.io/component: ca-renewal
+      # The Deployment and Service selector from the tests above.
+      - isNotSubset:
+          path: spec.jobTemplate.spec.template.metadata.labels
+          content:
+            app.kubernetes.io/name: krabka-operator
+            app.kubernetes.io/instance: demo
+            app.kubernetes.io/component: operator

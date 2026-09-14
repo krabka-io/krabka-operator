@@ -106,6 +106,24 @@ jobs:
         run: aspect build //...
       - name: test
         run: aspect test //...
+  # The chart templates. `helm unittest` renders the chart and checks the
+  # suites in charts/krabka-operator/tests, for example that the operator
+  # selectors do not select the CA-renewal Job pods.
+  helm:
+    name: helm lint · unit tests
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v4.2.4
+      # Helm 4 verifies plugin provenance by default. The helm-unittest release
+      # has no signature, so the install turns the verification off.
+      - run: helm plugin install https://github.com/helm-unittest/helm-unittest --version v0.6.0 --verify=false
+      - run: helm lint charts/krabka-operator
+      - run: helm unittest charts/krabka-operator
   # The checked-in CRD manifests are generated from the `#[derive(CustomResource)]`
   # types. A change to a CRD type that does not reach the manifests ships a
   # chart that installs a schema the operator no longer speaks, and nothing
