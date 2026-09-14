@@ -41,6 +41,7 @@ capture() {
         kubectl get persistentvolumeclaims -o json >"${evidence}/pvcs.json"
         kubectl get pods -A -o wide >"${evidence}/pods.txt"
         kubectl get events -A --sort-by=.lastTimestamp >"${evidence}/events.txt"
+        kubectl get lease -n krabka-system krabka-operator-leader -o json >"${evidence}/operator-lease.json"
         kubectl logs -n krabka-system -l app.kubernetes.io/name=krabka-operator \
             --all-containers --prefix >"${evidence}/operator.log"
         kubectl logs -l app.kubernetes.io/name=krabka-rebalancer \
@@ -96,6 +97,27 @@ helm install krabka-operator "${root}/charts/krabka-operator" \
     --set image.tag="${operator_image##*:}" \
     --set image.pullPolicy=Never \
     "${broker_values[@]}"
+
+# Roll the operator Deployment once (issue #49). The chart rolls with
+# maxUnavailable 0, so the old pod stops only after the new pod is Ready. The
+# old pod holds the leader lease until it stops. The new pod must get Ready
+# in standby, and it must take the lease after the old pod stops. The Kafka
+# steps below then run against the new leader.
+operator_pods=(-n krabka-system -l app.kubernetes.io/name=krabka-operator,app.kubernetes.io/component=operator)
+old_operator_pod="$(kubectl get pods "${operator_pods[@]}" -o jsonpath='{.items[0].metadata.name}')"
+kubectl wait -n krabka-system --for=create lease/krabka-operator-leader --timeout=2m
+kubectl wait -n krabka-system lease/krabka-operator-leader \
+    --for=jsonpath='{.spec.holderIdentity}'="${old_operator_pod}" --timeout=2m
+helm upgrade krabka-operator "${root}/charts/krabka-operator" \
+    --namespace krabka-system --reuse-values --wait --timeout 5m \
+    --set-string podAnnotations.krabka-lifecycle-rollout=second
+kubectl wait -n krabka-system --for=delete "pod/${old_operator_pod}" --timeout=2m
+new_operator_pod="$(kubectl get pods "${operator_pods[@]}" -o jsonpath='{.items[0].metadata.name}')"
+[[ -n "${new_operator_pod}" && "${new_operator_pod}" != "${old_operator_pod}" ]]
+kubectl wait -n krabka-system lease/krabka-operator-leader \
+    --for=jsonpath='{.spec.holderIdentity}'="${new_operator_pod}" --timeout=2m
+printf 'old_pod=%s\nnew_pod=%s\n' "${old_operator_pod}" "${new_operator_pod}" \
+    >"${evidence}/operator-rollout.txt"
 
 kubectl apply -f - <<EOF
 apiVersion: krabka.io/v1alpha1
