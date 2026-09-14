@@ -4,17 +4,18 @@
 //! election, and the Kafka controller into one supervised task tree. It
 //! returns when a supervised task finishes, when a supervised task fails,
 //! or when a shutdown signal arrives.
-
-use std::sync::Arc;
+//!
+//! The process moves through the [`Phase`] values. It is ready in
+//! [`Phase::Standby`], while it waits for the lease, and it starts the
+//! controllers only in [`Phase::Leading`].
 
 use kube::Client;
-use tokio::sync::Mutex;
 
 use crate::{
     config::OperatorConfig,
     context::Context,
     controller,
-    health::{self, HealthState},
+    health::{self, HealthState, Phase},
     leader_election, telemetry,
 };
 
@@ -31,8 +32,8 @@ pub async fn run(config: OperatorConfig) -> anyhow::Result<()> {
     config.validate().map_err(anyhow::Error::msg)?;
     telemetry::init_tracing(&config.log_filter);
     let (registry, metrics) = telemetry::new_registry_with_metrics();
-    let registry = Arc::new(Mutex::new(registry));
-    let health_state = HealthState::new(registry.clone());
+    let health_state = HealthState::new(registry);
+    let registry = health_state.registry.clone();
 
     let health_addr = config.health_addr;
     let health_handle = tokio::spawn({
@@ -42,6 +43,13 @@ pub async fn run(config: OperatorConfig) -> anyhow::Result<()> {
 
     let client = Client::try_default().await?;
 
+    // Ready before the lease: a rolling update stops the old leader only
+    // after this pod is Ready.
+    health_state.advance(Phase::Standby);
+    tracing::info!(
+        lease = %config.lease_name,
+        "ready in standby; waiting for the leader-election lease"
+    );
     let mut leadership = leader_election::acquire(
         client.clone(),
         &config.operator_namespace,
@@ -53,7 +61,8 @@ pub async fn run(config: OperatorConfig) -> anyhow::Result<()> {
     .await?;
 
     let ctx = Context::new(client, config, registry, metrics);
-    health_state.mark_ready();
+    health_state.advance(Phase::Leading);
+    tracing::info!("leading; starting the controllers");
 
     let kafka_handle = tokio::spawn({
         let ctx = ctx.clone();
@@ -90,7 +99,7 @@ pub async fn run(config: OperatorConfig) -> anyhow::Result<()> {
 
     tokio::select! {
         res = leadership.wait() => {
-            health_state.mark_not_ready();
+            health_state.advance(Phase::Stopping);
             return Err(res.err().unwrap_or_else(|| anyhow::anyhow!("leader-election renewal stopped")));
         },
         res = health_handle => match res {
@@ -140,7 +149,7 @@ pub async fn run(config: OperatorConfig) -> anyhow::Result<()> {
         },
         () = shutdown_signal() => tracing::info!("shutdown signal received"),
     }
-    health_state.mark_not_ready();
+    health_state.advance(Phase::Stopping);
     Ok(())
 }
 
