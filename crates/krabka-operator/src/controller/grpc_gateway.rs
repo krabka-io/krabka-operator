@@ -97,10 +97,7 @@ const DEFAULT_VALIDITY_DAYS: u32 = 365;
 
 /// Built-in gateway image. The operator uses it when neither `spec.image`
 /// nor `--default-gateway-image` is set.
-const DEFAULT_GATEWAY_IMAGE: &str = concat!(
-    "ghcr.io/krabka-io/krabka-operator-grpc-gateway:",
-    env!("CARGO_PKG_VERSION")
-);
+const DEFAULT_GATEWAY_IMAGE: &str = crate::controller::component_images::GATEWAY_IMAGE;
 
 // In-pod mount paths (Design §"Deployment mount set"). The gateway CLI flags
 // point at these.

@@ -148,6 +148,8 @@ async fn runtime_policy_renders_exact_flags_and_probe_timings() {
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(deployment.body()).unwrap();
     let container = &body["spec"]["template"]["spec"]["containers"][0];
+    // No spec.image and no operator default: the built-in default applies.
+    assert!(container["image"] == "ghcr.io/krabka-io/krabka-schema-registry:0.4.0");
     assert!(
         container["args"]
             == serde_json::json!([
