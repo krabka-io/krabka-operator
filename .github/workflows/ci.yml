@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
   packages: write
+  # The Aspect CLI uploads test logs and BEP through the Actions artifact
+  # API, which GitHub gates behind an OIDC token it only mints for jobs
+  # holding this. Without it those uploads are skipped and the run says so
+  # on every job.
+  id-token: write
 # Cancel superseded PR runs; let pushes to main run to completion.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -27,7 +32,7 @@ jobs:
           repository: krabka-io/krabka-rebalancer
           ref: 157c27c577dfb3ea1a7528f072962a5071fbbb06
           path: .m20/rebalancer
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}-kind
@@ -59,8 +64,9 @@ jobs:
           name: operator-kind-evidence
           path: ${{ runner.temp }}/operator-evidence
           if-no-files-found: warn
-  # Build, test, lint and format with plain Bazel. The runner uses only the
-  # GitHub Actions caches: no remote cache, no build event service.
+  # Build, test, lint and format. The Aspect CLI narrows each of these to what
+  # the change actually touched; `bazel build|test //...` is the equivalent for
+  # anyone without the CLI, and is what the nightly job runs.
   ci:
     name: build · test · lint · format
     needs: kind-lifecycle
@@ -76,34 +82,28 @@ jobs:
         with:
           # Change detection needs the merge base, not just the tip.
           fetch-depth: 0
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
-      # Check only the files that this change touched, so a file that a change
-      # did not touch is not held to the formatter. The base is the merge base
-      # for a pull request, the previous tip for a push to main, and main for a
-      # manual run.
+      # `--severity` defaults to `auto`, which the CLI resolves to `fail` on CI
+      # and `info` off it -- so this gates here and only reports locally.
       - name: format
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          set -euo pipefail
-          base="$(git merge-base "${BASE_SHA:-origin/main}" HEAD)"
-          mapfile -t files < <(git diff --name-only --diff-filter=d "${base}" HEAD)
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "No changed files to check."
-            exit 0
-          fi
-          bazel run //tools/format:format.check -- "${files[@]}"
+        run: aspect format
+      # `aspect lint` narrows to the targets a change touched and annotates the
+      # pull request. It reads the `rules_lint_machine` output group, which is
+      # why the clippy aspect comes from aspect_rules_lint_rust rather than from
+      # @rules_rust -- see //tools/lint/linters.bzl. `bazel test //...` gates on
+      # the same aspect through the `*_clippy` targets, for anyone without the
+      # CLI. The aspect is named here rather than left to the `build:lint`
+      # bazelrc config, which `aspect lint` does not read.
+      - name: lint
+        run: aspect lint --aspect=//tools/lint:linters.bzl%clippy
       - name: build
-        run: bazel build //...
-      # Clippy gates here: every crate has a `*_clippy` lint test, and
-      # `--@aspect_rules_lint//lint:fail_on_violation` in .bazelrc fails it on
-      # a finding.
+        run: aspect build //...
       - name: test
-        run: bazel test //...
+        run: aspect test //...
   # The chart templates. `helm unittest` renders the chart and checks the
   # suites in charts/krabka-operator/tests, for example that the operator
   # selectors do not select the CA-renewal Job pods.
@@ -133,7 +133,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}-crds
@@ -163,7 +163,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}-coverage
@@ -177,7 +177,8 @@ jobs:
           fail_ci_if_error: false
   # rustdoc for every crate, kept as an artifact. The `ci` job already builds
   # these -- a `rust_doc` per crate is an ordinary target -- so this exists to
-  # publish the output.
+  # publish the output, and to keep rendering the whole set even when `aspect
+  # build` narrowed to the crates a change touched.
   docs:
     name: docgen
     if: github.event_name != 'schedule'
@@ -185,7 +186,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}-docs
@@ -220,7 +221,7 @@ jobs:
       crates: ${{ steps.select.outputs.crates }}
     steps:
       - uses: actions/checkout@v7
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}-mutants
@@ -251,7 +252,7 @@ jobs:
         crate: ${{ fromJSON(needs.mutants-select.outputs.crates) }}
     steps:
       - uses: actions/checkout@v7
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}-mutants
