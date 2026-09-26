@@ -1140,6 +1140,20 @@ mod tests {
         }
     }
 
+    /// A transport error never reaches `from_rpc_error` from the reconcile,
+    /// which requeues before writing status, but it is retryable all the same.
+    #[test]
+    fn create_proposal_transport_error_stays_new() {
+        let o = Outcome::from_rpc_error(
+            RebalanceAction::CreateProposal,
+            &RebalancerError::Transport("connection refused".into()),
+            secs(15),
+            minutes(5),
+        );
+        assert!(o.state == RebalanceState::New);
+        assert!(o.requeue == secs(15));
+    }
+
     /// Only `CreateProposal` is safe to repeat unattended. A retryable error
     /// from `ExecuteProposal`, a poll, or a cancel still waits for an
     /// operator command.
