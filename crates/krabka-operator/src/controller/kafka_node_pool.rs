@@ -2471,6 +2471,22 @@ async fn patch_broker_drain_condition(
     Ok(Action::requeue(std::time::Duration::from_secs(1)))
 }
 
+/// The pool condition message while a managed drain has not reached a
+/// terminal state. It carries the drain's own message when there is one, so
+/// a proposal that retries on an under-replicated partition shows why.
+fn broker_drain_waiting_message(rebalance: &KafkaRebalance, brokers: &[i32]) -> String {
+    let waiting = format!("waiting for remove-brokers proposal for {brokers:?}");
+    match rebalance
+        .status
+        .as_ref()
+        .and_then(|status| status.conditions.iter().rev().find(|c| c.status == "True"))
+        .filter(|condition| !condition.message.is_empty())
+    {
+        Some(condition) => format!("{waiting}: {}", condition.message),
+        None => waiting,
+    }
+}
+
 struct BrokerDrainInput<'a> {
     pool: &'a KafkaNodePool,
     pool_api: &'a Api<KafkaNodePool>,
@@ -2595,7 +2611,7 @@ async fn reconcile_broker_drain(
                 input.pool_api,
                 input.name,
                 "BrokerDrainInProgress",
-                format!("waiting for remove-brokers proposal for {brokers:?}"),
+                broker_drain_waiting_message(&rebalance, &brokers),
             )
             .await
             .map(Some);
@@ -6247,5 +6263,47 @@ mod tests {
             matches!(version_gate(&parent), VersionGate::Cleared),
             "a finalized metadata version keeps a running cluster's pods"
         );
+    }
+
+    #[test]
+    fn broker_drain_waiting_message_carries_drain_condition() {
+        let condition = |type_: &str, status: &str, message: &str| KafkaCondition {
+            type_: type_.into(),
+            status: status.into(),
+            reason: "RetryingProposal".into(),
+            message: message.into(),
+            last_transition_time: "2026-09-26T00:00:00Z".into(),
+        };
+        let retrying = "CreateProposal will retry: rebalancer rpc error [failed_precondition]: \
+                        partition lifecycle-0 is under-replicated";
+        for (conditions, want) in [
+            (
+                vec![],
+                "waiting for remove-brokers proposal for [3]".to_string(),
+            ),
+            (
+                vec![condition("New", "True", "")],
+                "waiting for remove-brokers proposal for [3]".to_string(),
+            ),
+            (
+                vec![condition("New", "False", "stale")],
+                "waiting for remove-brokers proposal for [3]".to_string(),
+            ),
+            (
+                vec![condition("New", "True", retrying)],
+                format!("waiting for remove-brokers proposal for [3]: {retrying}"),
+            ),
+        ] {
+            let mut rebalance =
+                KafkaRebalance::new("m20-brokers-drain-to-3", KafkaRebalanceSpec::default());
+            rebalance.status = Some(crate::crd::KafkaRebalanceStatus {
+                conditions: conditions.clone(),
+                ..Default::default()
+            });
+            check!(
+                broker_drain_waiting_message(&rebalance, &[3]) == want,
+                "{conditions:?}"
+            );
+        }
     }
 }

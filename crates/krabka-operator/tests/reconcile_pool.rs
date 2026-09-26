@@ -910,6 +910,50 @@ async fn broker_scale_down_unregisters_only_after_current_drain_is_clear() {
     assert!(state.remaining_rules() == 0);
 }
 
+/// A managed drain whose `CreateProposal` is retrying stays `New`, and the
+/// pool's `BrokerDrainInProgress` message carries the drain's reason for
+/// waiting.
+#[tokio::test]
+async fn broker_scale_down_surfaces_retrying_drain_message() {
+    let retrying = "CreateProposal will retry: rebalancer rpc error [failed_precondition]: \
+                    partition lifecycle-0 is under-replicated";
+    let mut drain = ready_broker_drain(2, &[2, 3]);
+    drain["status"] = serde_json::json!({
+        "conditions": [{
+            "type": "New", "status": "True", "reason": "RetryingProposal",
+            "message": retrying, "lastTransitionTime": "2026-09-26T00:00:00Z"
+        }]
+    });
+    let mut rules = broker_downscale_rules(2, &[2, 3]);
+    rules.last_mut().unwrap().response = json_response(200, &drain);
+    rules.push(MockRule {
+        method: Method::PATCH,
+        path_substr: "/kafkanodepools/brokers/status".into(),
+        response: json_response(200, &fake_pool_body("brokers", "y", "demo")),
+    });
+    let (ctx, state) = build_ctx("y", rules);
+    let mut pool = pool_cr("brokers", "y", Some("demo"), 2);
+    pool.spec.roles = vec![NodeRole::Broker];
+
+    reconcile(Arc::new(pool), ctx).await.unwrap();
+
+    let observed = state.take_observed();
+    assert!(observed.iter().all(|request| {
+        !(request.method() == Method::PATCH && request.uri().to_string().contains("/statefulsets/"))
+    }));
+    let status = observed
+        .iter()
+        .find(|request| request.uri().to_string().contains("/status"))
+        .expect("drain status patch");
+    let body: serde_json::Value = serde_json::from_slice(status.body()).unwrap();
+    assert!(body["status"]["conditions"][0]["reason"] == "BrokerDrainInProgress");
+    assert!(
+        body["status"]["conditions"][0]["message"]
+            == format!("waiting for remove-brokers proposal for [2, 3]: {retrying}")
+    );
+    assert!(state.remaining_rules() == 0);
+}
+
 #[tokio::test]
 async fn broker_scale_down_blocks_when_a_removed_broker_still_has_data() {
     let mut rules = broker_downscale_rules(2, &[2, 3]);
