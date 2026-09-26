@@ -261,8 +261,28 @@ impl Outcome {
     }
 
     /// An RPC-level error from the rebalancer, such as `failed_precondition`
-    /// or `not_found`. It appears as `NotReady`.
-    fn from_rpc_error(e: &RebalancerError, idle_interval: Time) -> Self {
+    /// or `not_found`.
+    ///
+    /// A retryable error from `CreateProposal` keeps the rebalance in `New`,
+    /// so [`decide`] issues `CreateProposal` again after `retry_interval`. The
+    /// rebalancer refuses to plan while a partition is under-replicated, and
+    /// a drain the operator created on a node-pool scale-down must converge
+    /// once the ISR recovers. Every other error appears as `NotReady`, which
+    /// waits for a `refresh`.
+    fn from_rpc_error(
+        action: RebalanceAction,
+        e: &RebalancerError,
+        retry_interval: Time,
+        idle_interval: Time,
+    ) -> Self {
+        if action == RebalanceAction::CreateProposal && is_retryable(e) {
+            return Self::transient(
+                RebalanceState::New,
+                "RetryingProposal",
+                format!("CreateProposal will retry: {e}"),
+                retry_interval,
+            );
+        }
         Self::transient(
             RebalanceState::NotReady,
             "RebalancerError",
@@ -282,6 +302,31 @@ impl Outcome {
             new_optimization: None,
             advance_generation: false,
         }
+    }
+}
+
+/// Connect codes that describe a cluster or rebalancer condition that clears
+/// on its own, as opposed to a request that can never succeed. The `http_*`
+/// codes are the fallback for a non-Connect body, which a proxy in front of a
+/// restarting rebalancer returns.
+const RETRYABLE_RPC_CODES: [&str; 8] = [
+    "failed_precondition",
+    "unavailable",
+    "aborted",
+    "resource_exhausted",
+    "deadline_exceeded",
+    "http_502",
+    "http_503",
+    "http_504",
+];
+
+/// Whether a rebalancer error can succeed on a later attempt without any
+/// change to the `KafkaRebalance`.
+fn is_retryable(e: &RebalancerError) -> bool {
+    match e {
+        RebalancerError::Transport(_) => true,
+        RebalancerError::Rpc { code, .. } => RETRYABLE_RPC_CODES.contains(&code.as_str()),
+        RebalancerError::Decode(_) => false,
     }
 }
 
@@ -719,7 +764,12 @@ async fn reconcile_inner(
             ctx.drop_rebalancer_client(&endpoint).await;
             return Ok(common::requeue(ctx.config.controller_error_requeue));
         }
-        Err(e) => Outcome::from_rpc_error(&e, ctx.config.rebalancer_idle_interval),
+        Err(e) => Outcome::from_rpc_error(
+            action,
+            &e,
+            ctx.config.controller_error_requeue,
+            ctx.config.rebalancer_idle_interval,
+        ),
     };
 
     // 6. A command drove this pass (or was a no-op alongside it): consume
@@ -765,12 +815,7 @@ async fn write_status(
         existing.and_then(|s| s.observed_generation)
     };
 
-    let conditions = vec![condition(
-        outcome.state.as_str(),
-        "True",
-        &outcome.reason,
-        &outcome.message,
-    )];
+    let conditions = vec![active_condition(existing, outcome)];
     let body = json!({
         "status": {
             "conditions": conditions,
@@ -786,6 +831,32 @@ async fn write_status(
     api.patch_status(name, &params, &Patch::Merge(&body))
         .await?;
     Ok(())
+}
+
+/// The single active condition for `outcome`. It keeps the existing
+/// `lastTransitionTime` while the state does not change, so a retry that
+/// fails the same way writes an identical status: the patch is a no-op, no
+/// watch event fires, and the reconcile honours its requeue delay instead of
+/// running again at once.
+fn active_condition(
+    existing: Option<&crate::crd::KafkaRebalanceStatus>,
+    outcome: &Outcome,
+) -> crate::crd::KafkaCondition {
+    let mut active = condition(
+        outcome.state.as_str(),
+        "True",
+        &outcome.reason,
+        &outcome.message,
+    );
+    if let Some(previous) = existing
+        .and_then(|s| s.conditions.iter().rev().find(|c| c.status == "True"))
+        .filter(|c| c.type_ == active.type_)
+    {
+        active
+            .last_transition_time
+            .clone_from(&previous.last_transition_time);
+    }
+    active
 }
 
 /// Remove the `krabka.io/rebalance` annotation. A JSON-merge null deletes the
@@ -1004,10 +1075,158 @@ mod tests {
         assert!(o.message == "broker 2 down");
     }
 
+    fn rpc(code: &str, message: &str) -> RebalancerError {
+        RebalancerError::Rpc {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    #[test]
+    fn create_proposal_retryable_error_stays_new() {
+        for code in [
+            "failed_precondition",
+            "unavailable",
+            "aborted",
+            "resource_exhausted",
+            "deadline_exceeded",
+            "http_503",
+        ] {
+            let e = rpc(code, "partition lifecycle-0 is under-replicated");
+            let o =
+                Outcome::from_rpc_error(RebalanceAction::CreateProposal, &e, secs(15), minutes(5));
+            assert!(
+                o == Outcome {
+                    state: RebalanceState::New,
+                    reason: "RetryingProposal".into(),
+                    message: format!(
+                        "CreateProposal will retry: rebalancer rpc error [{code}]: \
+                         partition lifecycle-0 is under-replicated"
+                    ),
+                    requeue: secs(15),
+                    new_session: None,
+                    new_optimization: None,
+                    advance_generation: false,
+                },
+                "code {code:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_proposal_terminal_error_becomes_not_ready() {
+        for e in [
+            rpc("not_found", "no such broker"),
+            rpc("permission_denied", "bad token"),
+            rpc("invalid_argument", "unknown goal"),
+            rpc("unauthenticated", "missing token"),
+            rpc("http_400", "bad request"),
+            RebalancerError::Decode("expected object".into()),
+        ] {
+            let o =
+                Outcome::from_rpc_error(RebalanceAction::CreateProposal, &e, secs(15), minutes(5));
+            assert!(
+                o == Outcome {
+                    state: RebalanceState::NotReady,
+                    reason: "RebalancerError".into(),
+                    message: e.to_string(),
+                    requeue: minutes(5),
+                    new_session: None,
+                    new_optimization: None,
+                    advance_generation: false,
+                },
+                "error {e:?}"
+            );
+        }
+    }
+
+    /// Only `CreateProposal` is safe to repeat unattended. A retryable error
+    /// from `ExecuteProposal`, a poll, or a cancel still waits for an
+    /// operator command.
+    #[test]
+    fn retryable_error_outside_create_proposal_becomes_not_ready() {
+        let e = rpc("failed_precondition", "proposal not in Computed state");
+        for action in [
+            RebalanceAction::Execute,
+            RebalanceAction::PollExecution,
+            RebalanceAction::Cancel,
+        ] {
+            let o = Outcome::from_rpc_error(action, &e, secs(15), minutes(5));
+            assert!(o.state == RebalanceState::NotReady, "action {action:?}");
+            assert!(o.requeue == minutes(5), "action {action:?}");
+        }
+    }
+
+    /// The retry outcome feeds back into [`decide`]: the next pass, with the
+    /// `refresh` annotation already consumed, issues `CreateProposal` again
+    /// whether or not an older proposal id is on file.
+    #[test]
+    fn retry_outcome_reenters_create_proposal() {
+        let o = Outcome::from_rpc_error(
+            RebalanceAction::CreateProposal,
+            &rpc("unavailable", "rebalancer warming up"),
+            secs(15),
+            minutes(5),
+        );
+        for has_session in [false, true] {
+            assert!(
+                decide(o.state, None, has_session) == RebalanceAction::CreateProposal,
+                "has_session {has_session}"
+            );
+        }
+    }
+
+    #[test]
+    fn decide_not_ready_idles_without_command() {
+        assert!(decide(RebalanceState::NotReady, None, false) == RebalanceAction::Idle);
+    }
+
     #[test]
     fn cancel_becomes_stopped() {
         let o = Outcome::from_cancel(&proposal("p", ProposalStatus::Cancelled), minutes(5));
         assert!(o.state == RebalanceState::Stopped);
+    }
+
+    // ----- active_condition -------------------------------------------
+
+    #[test]
+    fn active_condition_keeps_transition_time_only_within_a_state() {
+        let status = |type_: &str| KafkaRebalanceStatus {
+            conditions: vec![KafkaCondition {
+                type_: type_.into(),
+                status: "True".into(),
+                reason: "RetryingProposal".into(),
+                message: "older error".into(),
+                last_transition_time: "2026-09-26T00:00:00Z".into(),
+            }],
+            ..Default::default()
+        };
+        let retry = Outcome::transient(
+            RebalanceState::New,
+            "RetryingProposal",
+            "CreateProposal will retry: newer error".into(),
+            secs(15),
+        );
+
+        let same_state = status("New");
+        assert!(
+            active_condition(Some(&same_state), &retry)
+                == KafkaCondition {
+                    type_: "New".into(),
+                    status: "True".into(),
+                    reason: "RetryingProposal".into(),
+                    message: "CreateProposal will retry: newer error".into(),
+                    last_transition_time: "2026-09-26T00:00:00Z".into(),
+                }
+        );
+
+        for existing in [None, Some(status("NotReady"))] {
+            let c = active_condition(existing.as_ref(), &retry);
+            assert!(
+                c.last_transition_time != "2026-09-26T00:00:00Z",
+                "{existing:?}"
+            );
+        }
     }
 
     // ----- current_state ----------------------------------------------

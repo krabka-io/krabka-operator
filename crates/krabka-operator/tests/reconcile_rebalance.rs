@@ -431,3 +431,82 @@ async fn transport_error_leaves_status_untouched() {
         "transport error must not issue any kube requests"
     );
 }
+
+/// A managed drain's first `CreateProposal` can race the ISR: the removed
+/// broker's pod is Ready before its partitions are back in sync, and the
+/// rebalancer answers `failed_precondition`. The drain stays `New`, requeues
+/// on the error interval, and the next pass proposes again. A terminal error
+/// still lands in `NotReady`.
+#[tokio::test]
+async fn create_proposal_rpc_error_retries_only_when_retryable() {
+    struct Case {
+        code: &'static str,
+        state: &'static str,
+        reason: &'static str,
+        requeue: std::time::Duration,
+    }
+    for case in [
+        Case {
+            code: "failed_precondition",
+            state: "New",
+            reason: "RetryingProposal",
+            requeue: std::time::Duration::from_millis(1_234),
+        },
+        Case {
+            code: "unavailable",
+            state: "New",
+            reason: "RetryingProposal",
+            requeue: std::time::Duration::from_millis(1_234),
+        },
+        Case {
+            code: "permission_denied",
+            state: "NotReady",
+            reason: "RebalancerError",
+            requeue: std::time::Duration::from_mins(5),
+        },
+    ] {
+        let mut config = op_config(NS);
+        config.controller_error_requeue = krabka_units::millis(1_234);
+        let (ctx, state) = build_ctx_with_config(
+            NS,
+            vec![
+                auth_secret_rule("demo-rebalancer-auth"),
+                status_rule("m20-brokers-drain-to-3"),
+            ],
+            config,
+        );
+        let fake = Arc::new(FakeRebalancerClient::new().with_create(FakeResp::Rpc {
+            code: case.code.into(),
+            message: "partition lifecycle-0 is under-replicated".into(),
+        }));
+        ctx.insert_rebalancer_client_for_test(ENDPOINT, fake.clone())
+            .await;
+
+        let mut kr = rebalance("m20-brokers-drain-to-3");
+        use_remove_brokers_auth(&mut kr);
+        kr.spec.brokers = vec![3];
+        let action = reconcile(Arc::new(kr), ctx).await.unwrap();
+
+        check!(
+            action == kube::runtime::controller::Action::requeue(case.requeue),
+            "{}",
+            case.code
+        );
+        let body = status_patch_body(&state.take_observed(), "m20-brokers-drain-to-3");
+        check!(
+            body["status"]["conditions"][0]["type"] == case.state,
+            "{}",
+            case.code
+        );
+        check!(
+            body["status"]["conditions"][0]["reason"] == case.reason,
+            "{}",
+            case.code
+        );
+        check!(
+            body["status"]["observedGeneration"].is_null(),
+            "{}",
+            case.code
+        );
+    }
+}
