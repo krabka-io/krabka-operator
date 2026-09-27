@@ -47,10 +47,9 @@ When you check generated protocol records or other structured values in tests, c
 
 ## Release Process
 
-Krabka uses **release-plz** for automated semantic versioning. Conventional commits drive the version bumps:
+A release is a version bump on `main` plus an annotated `vX.Y.Z` tag. Nothing is published to crates.io (`krabka-operator` is `publish = false`), and there is no release workflow.
 
-- `feat:` gives a minor version bump
-- `fix:` gives a patch version bump
-- `feat!:` gives a major version bump
-
-release-plz also generates the changelogs and publishes the crates to crates.io.
+1. Open a PR that sets the new version in `[workspace.package] version` in `Cargo.toml`, `version` in `MODULE.bazel`, and `WORKSPACE_VERSION` in `bazel/defs.bzl`, then refresh `Cargo.lock` with `cargo update -p krabka-operator`.
+2. Once it merges, the `kind lifecycle` job in `ci.yml` pushes the tested image as `ghcr.io/krabka-io/krabka-operator:<commit sha>` and `:<workspace version>`. The chart defaults its image tag to its appVersion, so the version tag is what a default install pulls.
+3. Tag the merge commit `vX.Y.Z` and record the image digest in the tag message.
+4. The chart is published by `helm-index.yml` in [krabka-io.github.io](https://github.com/krabka-io/krabka-io.github.io), which packages `charts/krabka-operator` from `main` with the workspace version as chart version and appVersion (the version in `Chart.yaml` is ignored). It runs daily; start it sooner with `gh api repos/krabka-io/krabka-io.github.io/dispatches -f event_type=charts-changed`. It opens an index pull request there, and the chart is live at `https://krabka.io/charts/krabka-operator-X.Y.Z.tgz` once a maintainer merges it.
