@@ -40,19 +40,161 @@ _LANDING_HEAD = [
 
 _LANDING_TAIL = ["</tbody>", "</table>", "</html>"]
 
-def manifest_field(lines, field):
-    """The value `field` is assigned on its first `field = "..."` line.
+# What a TOML basic string's single-character escapes stand for.
+_SIMPLE_ESCAPES = {
+    '"': '"',
+    "\\": "\\",
+    "n": "\n",
+    "t": "\t",
+    "r": "\r",
+    "b": "\x08",
+    "f": "\x0c",
+}
 
-    The manifests here open with `[package]`, so the first assignment is the
-    package's own. A value holding a quote keeps it: the shell script this
-    replaced matched with a greedy `.*` up to the line's last quote, and the
-    landing page has always carried such a description through verbatim.
+_HEX_DIGITS = "0123456789abcdefABCDEF"
+
+def _decode_basic_string(text):
+    """The value of the TOML basic string that opens `text`, or `None`.
+
+    `text` starts at the opening quote. The string ends at the first
+    unescaped quote, and whatever follows it (a trailing comment, say) is
+    ignored. `None` means the string is unclosed or holds an escape TOML does
+    not define, including a `\\u` or `\\U` that is not a Unicode scalar value.
     """
-    prefix = field + ' = "'
-    for line in lines:
-        if line.startswith(prefix) and line.endswith('"') and len(line) > len(prefix):
-            return line[len(prefix):-1]
+    out = []
+    i = 1
+    size = len(text)
+
+    # Every pass advances `i` by at least one, so `size` passes suffice.
+    for _ in range(size):
+        if i >= size:
+            return None
+        char = text[i]
+        if char == '"':
+            return "".join(out)
+        if char != "\\":
+            out.append(char)
+            i += 1
+            continue
+        if i + 1 >= size:
+            return None
+        escape = text[i + 1]
+        if escape in _SIMPLE_ESCAPES:
+            out.append(_SIMPLE_ESCAPES[escape])
+            i += 2
+        elif escape == "u" or escape == "U":
+            digits = 4 if escape == "u" else 8
+            hex_text = text[i + 2:i + 2 + digits]
+            if len(hex_text) != digits:
+                return None
+            for digit in hex_text.elems():
+                if digit not in _HEX_DIGITS:
+                    return None
+            code = int(hex_text, 16)
+            if code > 0x10FFFF or (code >= 0xD800 and code <= 0xDFFF):
+                return None
+            out.append(chr(code))
+            i += 2 + digits
+        else:
+            return None
+    return None
+
+def _string_value(text):
+    """The TOML string value that opens `text`, or `None` when none does.
+
+    A basic string (`"..."`) is decoded; a literal string (`'...'`) is taken
+    verbatim up to its next quote. Anything after the closing quote is ignored.
+    """
+    if text.startswith('"'):
+        return _decode_basic_string(text)
+    if text.startswith("'"):
+        end = text.find("'", 1)
+        return text[1:end] if end > 0 else None
+    return None
+
+def _table_header(line):
+    """The name inside a `[table]` header line, or "" for anything else.
+
+    An array-of-tables header (`[[name]]`) is not a plain table and gives "".
+    """
+    if not line.startswith("[") or line.startswith("[["):
+        return ""
+    end = line.find("]")
+    return line[1:end].strip() if end > 0 else ""
+
+def manifest_field(lines, field):
+    """The decoded value of `field` in the `[package]` table, or "".
+
+    Only keys between the `[package]` header and the next table header count,
+    so a dependency's `name` or `description` is never read. Keys may be
+    indented and may have any whitespace, or none, around `=`. The value is a
+    TOML basic string, whose escapes `\\"`, `\\\\`, `\\n`, `\\t`, `\\r`, `\\b`,
+    `\\f`, `\\uXXXX` and `\\UXXXXXXXX` are decoded, or a literal string, which
+    is taken verbatim. Text after the closing quote, such as a `# comment`, is
+    ignored. The first assignment wins; a missing field, a dotted key such as
+    `description.workspace = true`, or a malformed string reads as "".
+    """
+    in_package = False
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("["):
+            in_package = _table_header(line) == "package"
+            continue
+        if not in_package or not line.startswith(field):
+            continue
+        rest = line[len(field):].lstrip()
+        if not rest.startswith("="):
+            continue
+        value = _string_value(rest[1:].lstrip())
+        return value if value != None else ""
     return ""
+
+def _normalize(path):
+    """The absolute `path` with `.`, `..` and duplicate slashes collapsed."""
+    parts = []
+    for segment in path.split("/"):
+        if segment == "" or segment == ".":
+            continue
+        if segment == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(segment)
+    return "/" + "/".join(parts)
+
+# Top-level entries of the checkout that an output directory must never be, or
+# sit inside, because the task empties the output directory before writing.
+_PROTECTED = ["crates", ".git", ".github", ".aspect", "bazel", "docs"]
+
+def output_problem(root, out):
+    """Why `out` is not a safe place to empty and write, or "" when it is.
+
+    Both paths are normalized first. The output must be a strict descendant of
+    the repository `root` and must not start in one of the checkout's own
+    top-level directories or in a `bazel-*` output symlink.
+    """
+    base = _normalize(root)
+    target = _normalize(out)
+    if target == "/":
+        return "refusing to use / as the output directory"
+    if target == base:
+        return "refusing to use the repository root %s as the output directory" % target
+    prefix = base.rstrip("/") + "/"
+    if not target.startswith(prefix):
+        return "output directory %s is not inside the repository %s" % (target, base)
+    first = target[len(prefix):].split("/")[0]
+    if first in _PROTECTED or first.startswith("bazel-"):
+        return "refusing to use %s, which is part of the checkout, as the output directory" % target
+    return ""
+
+def html_escape(text):
+    """`text` with the characters HTML gives meaning to written as entities."""
+    return (text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;"))
 
 def snake(name):
     """The Rust module name for the crate Cargo calls `name`."""
@@ -80,18 +222,21 @@ def redirect_page(name, module):
     return "\n".join([
         "<!doctype html>",
         '<meta charset="utf-8">',
-        '<meta http-equiv="refresh" content="0; url=%s/index.html">' % module,
-        "<title>%s</title>" % name,
-        '<a href="%s/index.html">%s</a>' % (module, name),
+        '<meta http-equiv="refresh" content="0; url=%s/index.html">' % html_escape(module),
+        "<title>%s</title>" % html_escape(name),
+        '<a href="%s/index.html">%s</a>' % (html_escape(module), html_escape(name)),
     ]) + "\n"
 
 def landing_row(row):
-    """The landing page's table row for one `struct(name, snake, description)`."""
+    """The landing page's table row for one `struct(name, snake, description)`.
+
+    The fields come from a manifest, so each is HTML-escaped on the way in.
+    """
     return '<tr><td><a href="%s/%s/index.html"><code>%s</code></a></td><td>%s</td></tr>' % (
-        row.name,
-        row.snake,
-        row.name,
-        row.description,
+        html_escape(row.name),
+        html_escape(row.snake),
+        html_escape(row.name),
+        html_escape(row.description),
     )
 
 def landing_page(rows):
@@ -198,6 +343,10 @@ def _impl(ctx: TaskContext) -> int:
         ctx.std.io.stderr.write("no output directory: pass --output\n")
         return 2
     out = resolve_output(root, ctx.args.output)
+    refusal = output_problem(root, out)
+    if refusal:
+        ctx.std.io.stderr.write(refusal + "\n")
+        return 2
 
     crates = _crates(fs, root)
     if not crates:

@@ -35,6 +35,8 @@ concurrency:
 jobs:
   build:
     name: render rustdoc
+    # workflow_dispatch can run from any ref; only main may publish to production Pages.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -57,6 +59,8 @@ jobs:
 
   deploy:
     name: deploy to GitHub Pages
+    # workflow_dispatch can run from any ref; only main may publish to production Pages.
+    if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
