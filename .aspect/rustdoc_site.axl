@@ -1,0 +1,392 @@
+"""Assemble the rendered rustdoc set into one static site with a landing page.
+
+`bazel build $(bazel query 'kind("rust_doc rule", //crates/...)')` writes one
+`<lib>_doc.rustdoc` directory per crate under `bazel-bin/crates/<pkg>/`. This
+copies each of them to `<out>/<cargo-name>/`, adds a redirect from that
+directory to the crate's own `index.html`, and writes `<out>/index.html` that
+lists every crate with its Cargo description. The docs-pages workflow uploads
+`<out>` to GitHub Pages.
+
+    aspect rustdoc-site --output site
+"""
+
+load("./repo.axl", "is_file", "read_lines")
+
+# The suffix `rules_rust` gives the directory a `rust_doc` rule produces.
+RUSTDOC_SUFFIX = "_doc.rustdoc"
+
+# Everything of the landing page that precedes the crate rows. It is a list of
+# lines rather than one blob because the rows are lines too, so the page is a
+# single join and the trailing newline is not a special case.
+_LANDING_HEAD = [
+    "<!doctype html>",
+    '<html lang="en">',
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    "<title>krabka-operator API documentation</title>",
+    "<style>",
+    "  body { font: 16px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; }",
+    "  table { border-collapse: collapse; width: 100%; }",
+    "  th, td { border-bottom: 1px solid #ccc; padding: 0.5rem; text-align: left; vertical-align: top; }",
+    "</style>",
+    "<h1>krabka-operator API documentation</h1>",
+    "<p>Rustdoc for every crate in",
+    '<a href="https://github.com/krabka-io/krabka-operator">krabka-io/krabka-operator</a>,',
+    "rendered from the <code>main</code> branch.</p>",
+    "<table>",
+    "<thead><tr><th>Crate</th><th>What it is</th></tr></thead>",
+    "<tbody>",
+]
+
+_LANDING_TAIL = ["</tbody>", "</table>", "</html>"]
+
+# What a TOML basic string's single-character escapes stand for.
+_SIMPLE_ESCAPES = {
+    '"': '"',
+    "\\": "\\",
+    "n": "\n",
+    "t": "\t",
+    "r": "\r",
+    "b": "\x08",
+    "f": "\x0c",
+}
+
+_HEX_DIGITS = "0123456789abcdefABCDEF"
+
+def _decode_basic_string(text):
+    """The value of the TOML basic string that opens `text`, or `None`.
+
+    `text` starts at the opening quote. The string ends at the first
+    unescaped quote, and whatever follows it (a trailing comment, say) is
+    ignored. `None` means the string is unclosed or holds an escape TOML does
+    not define, including a `\\u` or `\\U` that is not a Unicode scalar value.
+    """
+    out = []
+    i = 1
+    size = len(text)
+
+    # Every pass advances `i` by at least one, so `size` passes suffice.
+    for _ in range(size):
+        if i >= size:
+            return None
+        char = text[i]
+        if char == '"':
+            return "".join(out)
+        if char != "\\":
+            out.append(char)
+            i += 1
+            continue
+        if i + 1 >= size:
+            return None
+        escape = text[i + 1]
+        if escape in _SIMPLE_ESCAPES:
+            out.append(_SIMPLE_ESCAPES[escape])
+            i += 2
+        elif escape == "u" or escape == "U":
+            digits = 4 if escape == "u" else 8
+            hex_text = text[i + 2:i + 2 + digits]
+            if len(hex_text) != digits:
+                return None
+            for digit in hex_text.elems():
+                if digit not in _HEX_DIGITS:
+                    return None
+            code = int(hex_text, 16)
+            if code > 0x10FFFF or (code >= 0xD800 and code <= 0xDFFF):
+                return None
+            out.append(chr(code))
+            i += 2 + digits
+        else:
+            return None
+    return None
+
+def _string_value(text):
+    """The TOML string value that opens `text`, or `None` when none does.
+
+    A basic string (`"..."`) is decoded; a literal string (`'...'`) is taken
+    verbatim up to its next quote. Anything after the closing quote is ignored.
+    """
+    if text.startswith('"'):
+        return _decode_basic_string(text)
+    if text.startswith("'"):
+        end = text.find("'", 1)
+        return text[1:end] if end > 0 else None
+    return None
+
+def _table_header(line):
+    """The name inside a `[table]` header line, or "" for anything else.
+
+    An array-of-tables header (`[[name]]`) is not a plain table and gives "".
+    """
+    if not line.startswith("[") or line.startswith("[["):
+        return ""
+    end = line.find("]")
+    return line[1:end].strip() if end > 0 else ""
+
+def manifest_field(lines, field):
+    """The decoded value of `field` in the `[package]` table, or "".
+
+    Only keys between the `[package]` header and the next table header count,
+    so a dependency's `name` or `description` is never read. Keys may be
+    indented and may have any whitespace, or none, around `=`. The value is a
+    TOML basic string, whose escapes `\\"`, `\\\\`, `\\n`, `\\t`, `\\r`, `\\b`,
+    `\\f`, `\\uXXXX` and `\\UXXXXXXXX` are decoded, or a literal string, which
+    is taken verbatim. Text after the closing quote, such as a `# comment`, is
+    ignored. The first assignment wins; a missing field, a dotted key such as
+    `description.workspace = true`, or a malformed string reads as "".
+    """
+    in_package = False
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("["):
+            in_package = _table_header(line) == "package"
+            continue
+        if not in_package or not line.startswith(field):
+            continue
+        rest = line[len(field):].lstrip()
+        if not rest.startswith("="):
+            continue
+        value = _string_value(rest[1:].lstrip())
+        return value if value != None else ""
+    return ""
+
+def _normalize(path):
+    """The absolute `path` with `.`, `..` and duplicate slashes collapsed."""
+    parts = []
+    for segment in path.split("/"):
+        if segment == "" or segment == ".":
+            continue
+        if segment == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(segment)
+    return "/" + "/".join(parts)
+
+# Top-level entries of the checkout that an output directory must never be, or
+# sit inside, because the task empties the output directory before writing.
+_PROTECTED = ["crates", ".git", ".github", ".aspect", "bazel", "docs"]
+
+def output_problem(root, out):
+    """Why `out` is not a safe place to empty and write, or "" when it is.
+
+    Both paths are normalized first. The output must be a strict descendant of
+    the repository `root` and must not start in one of the checkout's own
+    top-level directories or in a `bazel-*` output symlink.
+    """
+    base = _normalize(root)
+    target = _normalize(out)
+    if target == "/":
+        return "refusing to use / as the output directory"
+    if target == base:
+        return "refusing to use the repository root %s as the output directory" % target
+    prefix = base.rstrip("/") + "/"
+    if not target.startswith(prefix):
+        return "output directory %s is not inside the repository %s" % (target, base)
+    first = target[len(prefix):].split("/")[0]
+    if first in _PROTECTED or first.startswith("bazel-"):
+        return "refusing to use %s, which is part of the checkout, as the output directory" % target
+    return ""
+
+def html_escape(text):
+    """`text` with the characters HTML gives meaning to written as entities."""
+    return (text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;"))
+
+def snake(name):
+    """The Rust module name for the crate Cargo calls `name`."""
+    return name.replace("-", "_")
+
+def find_rustdoc(entries):
+    """The rustdoc directory among a listing's `entries`, or "" when there is none.
+
+    A `rust_doc` rule is named after the library it documents, so which entry
+    it is depends on the crate; the suffix is the only fixed part. The listing
+    is searched in sorted order so that a package with two of them -- which no
+    package here has -- picks the same one on every machine.
+    """
+    for entry in sorted(entries):
+        if entry.endswith(RUSTDOC_SUFFIX):
+            return entry
+    return ""
+
+def redirect_page(name, module):
+    """The page at `<out>/<name>/index.html`, which forwards to the crate's own.
+
+    Rustdoc's output sits one directory further down, under the crate's module
+    name, so without this the crate's directory has no entry point at all.
+    """
+    return "\n".join([
+        "<!doctype html>",
+        '<meta charset="utf-8">',
+        '<meta http-equiv="refresh" content="0; url=%s/index.html">' % html_escape(module),
+        "<title>%s</title>" % html_escape(name),
+        '<a href="%s/index.html">%s</a>' % (html_escape(module), html_escape(name)),
+    ]) + "\n"
+
+def landing_row(row):
+    """The landing page's table row for one `struct(name, snake, description)`.
+
+    The fields come from a manifest, so each is HTML-escaped on the way in.
+    """
+    return '<tr><td><a href="%s/%s/index.html"><code>%s</code></a></td><td>%s</td></tr>' % (
+        html_escape(row.name),
+        html_escape(row.snake),
+        html_escape(row.name),
+        html_escape(row.description),
+    )
+
+def landing_page(rows):
+    """The site's `index.html`, listing one `struct(name, snake, description)` per row."""
+    lines = list(_LANDING_HEAD)
+    for row in rows:
+        lines.append(landing_row(row))
+    return "\n".join(lines + _LANDING_TAIL) + "\n"
+
+def problems(crates):
+    """Every complaint about `crates`, in report order.
+
+    A crate is `struct(package, name, snake, description, rustdoc, has_index)`:
+    its directory under `crates/`, what its manifest calls it, that name as a
+    module, the rustdoc directory found for it under `bazel-bin` (or "" when
+    there is none), and whether that directory holds the crate's own index.
+    """
+    found = []
+    for crate in crates:
+        if not crate.name:
+            found.append("crates/%s/Cargo.toml declares no package name" % crate.package)
+        elif not crate.rustdoc:
+            found.append("no rustdoc output for %s under bazel-bin/crates/%s" % (crate.name, crate.package))
+        elif not crate.has_index:
+            found.append("%s has no %s/index.html" % (crate.rustdoc, crate.snake))
+    return found
+
+def resolve_output(root, output):
+    """`output` as an absolute path, a relative one taken from the repo root."""
+    if output.startswith("/"):
+        return output
+    return root + "/" + output
+
+def copy_tree(fs, source, destination):
+    """Copy the tree at `source` to `destination` writable, and count the files.
+
+    Bazel writes its outputs read-only and reaches them through symlinks, which
+    is what the `cp -rL` and `chmod -R u+w` of the shell script this replaced
+    were for: the redirect page is written into the copy, so the copy cannot
+    inherit the read-only bit. `repo.axl`'s `walk` will not serve here because
+    it classifies entries from `read_dir` alone, which reports a symlink as
+    neither file nor directory and would therefore drop one silently;
+    `fs.metadata` resolves it the way `-L` does.
+    """
+    copied = 0
+    pending = [""]
+
+    # Starlark has no `while` and forbids recursion, so the frontier is drained
+    # by a bounded sweep whose exhaustion is itself an error.
+    for _ in range(100000):
+        if not pending:
+            break
+        relative = pending.pop()
+        fs.create_dir_all(destination + relative)
+        for entry in fs.read_dir(source + relative):
+            child = relative + "/" + entry.path
+            metadata = fs.metadata(source + child)
+            if metadata.is_dir:
+                pending.append(child)
+            else:
+                fs.copy(source + child, destination + child)
+                fs.set_permissions(destination + child, 0o755 if metadata.executable else 0o644)
+                copied += 1
+    if pending:
+        fail("copy_tree: %s holds more directories than this sweep can reach" % source)
+    return copied
+
+def _rustdoc_dir(fs, root, package):
+    directory = root + "/bazel-bin/crates/" + package
+    if not fs.exists(directory):
+        return ""
+    entry = find_rustdoc([listed.path for listed in fs.read_dir(directory)])
+    return directory + "/" + entry if entry else ""
+
+def _crates(fs, root):
+    found = []
+    for entry in fs.read_dir(root + "/crates"):
+        if not entry.is_dir:
+            continue
+        manifest = root + "/crates/" + entry.path + "/Cargo.toml"
+        if not is_file(fs, manifest):
+            continue
+        lines = read_lines(fs, manifest)
+        name = manifest_field(lines, "name")
+        module = snake(name)
+        rustdoc = _rustdoc_dir(fs, root, entry.path)
+        found.append(struct(
+            package = entry.path,
+            name = name,
+            snake = module,
+            description = manifest_field(lines, "description"),
+            rustdoc = rustdoc,
+            has_index = bool(rustdoc) and is_file(fs, rustdoc + "/" + module + "/index.html"),
+        ))
+
+    # The shell glob this replaced expanded in directory-name order, and the
+    # landing page's rows still follow it.
+    return sorted(found, key = lambda crate: crate.package)
+
+def _impl(ctx: TaskContext) -> int:
+    fs = ctx.std.fs
+    root = ctx.std.env.bazel_root_dir()
+    if not ctx.args.output:
+        ctx.std.io.stderr.write("no output directory: pass --output\n")
+        return 2
+    out = resolve_output(root, ctx.args.output)
+    refusal = output_problem(root, out)
+    if refusal:
+        ctx.std.io.stderr.write(refusal + "\n")
+        return 2
+
+    crates = _crates(fs, root)
+    if not crates:
+        ctx.std.io.stderr.write("no crates found under crates/\n")
+        return 1
+
+    # Every crate is checked before anything is written, so a missing rustdoc
+    # directory names all of its fellows too rather than only the first.
+    found = problems(crates)
+    for problem in found:
+        ctx.std.io.stderr.write(problem + "\n")
+    if found:
+        return 1
+
+    if fs.exists(out):
+        fs.remove_dir_all(out)
+    fs.create_dir_all(out)
+
+    rows = []
+    for crate in crates:
+        destination = out + "/" + crate.name
+        copy_tree(fs, crate.rustdoc, destination)
+        fs.write(destination + "/index.html", redirect_page(crate.name, crate.snake))
+        rows.append(struct(name = crate.name, snake = crate.snake, description = crate.description))
+    fs.write(out + "/index.html", landing_page(rows))
+
+    # `.nojekyll` keeps Pages from dropping rustdoc's `static.files` and other
+    # underscore-prefixed paths.
+    fs.write(out + "/.nojekyll", "")
+
+    ctx.std.io.stdout.write("rustdoc-site: wrote %s from %d crates\n" % (out, len(crates)))
+    return 0
+
+rustdoc_site = task(
+    summary = "Assemble the rendered rustdoc set into one static site",
+    implementation = _impl,
+    args = {
+        "output": args.string(
+            default = "site",
+            description = "Directory to write the site to, relative to the repository root.",
+        ),
+    },
+)
