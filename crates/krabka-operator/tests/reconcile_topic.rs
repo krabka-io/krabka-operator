@@ -612,19 +612,19 @@ async fn config_diff_sets_and_deletes() {
         })
         .expect("IncrementalAlterConfigs call expected");
 
-    let has_set_bar = ops.iter().any(|op| {
-        matches!(
-            op,
-            krabka_client_admin::IncrementalAlterOp::Set { topic, key, value }
-                if topic == TOPIC_NAME && key == "bar" && value == "2"
-        )
+    let has_set_bar = ops.iter().any(|(resource, operations)| {
+        resource.name == TOPIC_NAME
+            && operations.iter().any(|op| {
+                op.op_type == krabka_client_admin::AlterConfigOpType::Set
+                    && op.name == "bar"
+                    && op.value.as_deref() == Some("2")
+            })
     });
-    let has_delete_foo = ops.iter().any(|op| {
-        matches!(
-            op,
-            krabka_client_admin::IncrementalAlterOp::Delete { topic, key }
-                if topic == TOPIC_NAME && key == "foo"
-        )
+    let has_delete_foo = ops.iter().any(|(resource, operations)| {
+        resource.name == TOPIC_NAME
+            && operations.iter().any(|op| {
+                op.op_type == krabka_client_admin::AlterConfigOpType::Delete && op.name == "foo"
+            })
     });
     assert!(has_set_bar, "expected SET bar=2, got {ops:?}");
     assert!(has_delete_foo, "expected DELETE foo, got {ops:?}");

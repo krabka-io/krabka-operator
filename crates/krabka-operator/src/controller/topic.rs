@@ -10,7 +10,8 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
 use krabka_client_admin::{
-    AdminClientLike, CreatePartitionsOp, CreateTopicSpec, IncrementalAlterOp,
+    AdminClientLike, AlterConfigOp, ConfigResource, CreatePartitionsOp, CreateTopicSpec,
+    DescribeConfigsOptions, IncrementalAlterConfigsOptions, TopicMutationOptions,
     TopicReplicationStatus,
 };
 use kube::{
@@ -113,8 +114,9 @@ async fn create_topic(
                 partitions: obj.spec.partitions,
                 replicas: obj.spec.replicas,
                 configs: obj.spec.config.clone().unwrap_or_default(),
+                ..Default::default()
             }],
-            ctx.config.topic_mutation_timeout,
+            TopicMutationOptions::with_timeout(ctx.config.topic_mutation_timeout),
         )
         .await
     {
@@ -230,7 +232,10 @@ async fn prepare_topic(
         {
             let mut admin = client.lock().await;
             if let Err(error) = admin
-                .delete_topics(&[&topic_name], ctx.config.topic_mutation_timeout)
+                .delete_topics(
+                    &[&topic_name],
+                    TopicMutationOptions::with_timeout(ctx.config.topic_mutation_timeout),
+                )
                 .await
             {
                 tracing::warn!(%error, %topic_name, "DeleteTopics failed during finalizer");
@@ -332,6 +337,30 @@ async fn reconcile_replication_factor(
 }
 
 // linear pipeline; extraction hurts more than helps
+async fn topic_config_overrides(
+    admin: &mut (dyn AdminClientLike + Send),
+    resource: &ConfigResource,
+) -> Result<BTreeMap<String, String>, krabka_client_admin::AdminError> {
+    let mut results = admin
+        .describe_configs(
+            std::slice::from_ref(resource),
+            DescribeConfigsOptions::default(),
+        )
+        .await?;
+    results
+        .remove(resource)
+        .ok_or_else(|| {
+            krabka_client_admin::AdminError::Protocol("DescribeConfigs omitted the topic".into())
+        })?
+        .map(|config| config.dynamic_overrides(resource))
+        .map_err(|error| krabka_client_admin::AdminError::Broker {
+            api: "DescribeConfigs",
+            code: error.code,
+            name: error.name,
+            message: error.message,
+        })
+}
+
 async fn reconcile_inner(
     obj: Arc<KafkaTopic>,
     ctx: Arc<Context>,
@@ -416,8 +445,9 @@ async fn reconcile_inner(
                         &[CreatePartitionsOp {
                             name: topic_name.clone(),
                             new_total_count: obj.spec.partitions,
+                            ..Default::default()
                         }],
-                        ctx.config.topic_mutation_timeout,
+                        TopicMutationOptions::with_timeout(ctx.config.topic_mutation_timeout),
                     )
                     .await;
                 match outcomes {
@@ -468,12 +498,9 @@ async fn reconcile_inner(
 
             // Config diff
             let desired = obj.spec.config.clone().unwrap_or_default();
-            let overrides = match admin.describe_configs(&[&topic_name]).await {
-                Ok(v) => v
-                    .into_iter()
-                    .next()
-                    .map(|o| o.overrides)
-                    .unwrap_or_default(),
+            let resource = ConfigResource::topic(topic_name.clone());
+            let overrides = match topic_config_overrides(&mut *admin, &resource).await {
+                Ok(overrides) => overrides,
                 Err(e) => {
                     tracing::warn!(error = %e, "DescribeConfigs failed");
                     let is_transport = matches!(e, krabka_client_admin::AdminError::Transport(_));
@@ -484,11 +511,17 @@ async fn reconcile_inner(
                     return Ok(common::requeue(ctx.config.controller_error_requeue));
                 }
             };
-            let ops = diff_configs(&overrides, &desired, &topic_name);
+            let ops = diff_configs(&overrides, &desired);
             if !ops.is_empty() {
-                match admin.incremental_alter_configs(&ops).await {
+                match admin
+                    .incremental_alter_configs(
+                        &BTreeMap::from([(resource, ops)]),
+                        IncrementalAlterConfigsOptions::default(),
+                    )
+                    .await
+                {
                     Ok(outcomes) => {
-                        if let Some(err) = outcomes.into_iter().find_map(|o| o.error) {
+                        if let Some(err) = outcomes.into_values().find_map(Result::err) {
                             patch_status(
                                 &topic_api,
                                 &name,
@@ -536,30 +569,22 @@ async fn reconcile_inner(
 }
 
 /// Diffs `desired` against the `current` overrides and produces a `Vec`
-/// of `IncrementalAlterOps`.
+/// of `AlterConfigOp`s.
 ///
 /// This is a pure function. The tests below cover it.
 pub(crate) fn diff_configs(
     current: &BTreeMap<String, String>,
     desired: &BTreeMap<String, String>,
-    topic: &str,
-) -> Vec<IncrementalAlterOp> {
+) -> Vec<AlterConfigOp> {
     let mut ops = Vec::new();
     for (k, v) in desired {
         if current.get(k) != Some(v) {
-            ops.push(IncrementalAlterOp::Set {
-                topic: topic.to_string(),
-                key: k.clone(),
-                value: v.clone(),
-            });
+            ops.push(AlterConfigOp::set(k, v));
         }
     }
     for k in current.keys() {
         if !desired.contains_key(k) {
-            ops.push(IncrementalAlterOp::Delete {
-                topic: topic.to_string(),
-                key: k.clone(),
-            });
+            ops.push(AlterConfigOp::delete(k));
         }
     }
     ops
@@ -799,36 +824,33 @@ mod tests {
     fn diff_configs_set_adds_missing_key() {
         let current = BTreeMap::new();
         let desired = BTreeMap::from([("retention.ms".to_string(), "60000".to_string())]);
-        let ops = diff_configs(&current, &desired, "foo");
+        let ops = diff_configs(&current, &desired);
         assert!(ops.len() == 1);
-        assert!(matches!(&ops[0], IncrementalAlterOp::Set { key, value, .. }
-            if key == "retention.ms" && value == "60000"));
+        assert!(ops[0] == AlterConfigOp::set("retention.ms", "60000"));
     }
 
     #[test]
     fn diff_configs_set_updates_changed_value() {
         let current = BTreeMap::from([("retention.ms".to_string(), "30000".to_string())]);
         let desired = BTreeMap::from([("retention.ms".to_string(), "60000".to_string())]);
-        let ops = diff_configs(&current, &desired, "foo");
+        let ops = diff_configs(&current, &desired);
         assert!(ops.len() == 1);
-        assert!(matches!(&ops[0], IncrementalAlterOp::Set { value, .. } if value == "60000"));
+        assert!(ops[0] == AlterConfigOp::set("retention.ms", "60000"));
     }
 
     #[test]
     fn diff_configs_delete_removes_extra_key() {
         let current = BTreeMap::from([("cleanup.policy".to_string(), "delete".to_string())]);
         let desired = BTreeMap::new();
-        let ops = diff_configs(&current, &desired, "foo");
+        let ops = diff_configs(&current, &desired);
         assert!(ops.len() == 1);
-        assert!(
-            matches!(&ops[0], IncrementalAlterOp::Delete { key, .. } if key == "cleanup.policy")
-        );
+        assert!(ops[0] == AlterConfigOp::delete("cleanup.policy"));
     }
 
     #[test]
     fn diff_configs_noop_when_matching() {
         let m = BTreeMap::from([("retention.ms".to_string(), "60000".to_string())]);
-        assert!(diff_configs(&m, &m, "foo").is_empty());
+        assert!(diff_configs(&m, &m).is_empty());
     }
 
     #[test]
@@ -841,7 +863,7 @@ mod tests {
             ("retention.ms".to_string(), "60000".to_string()),
             ("segment.bytes".to_string(), "1048576".to_string()),
         ]);
-        let ops = diff_configs(&current, &desired, "foo");
+        let ops = diff_configs(&current, &desired);
         assert!(
             ops.len() == 3,
             "expected SET(retention.ms), SET(segment.bytes), DELETE(cleanup.policy)"

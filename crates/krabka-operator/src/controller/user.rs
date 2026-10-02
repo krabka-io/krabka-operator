@@ -1504,8 +1504,17 @@ mod tests {
 
     #[test]
     fn delegation_token_access_errors_classify_only_broker_responses_as_broker_errors() {
-        assert!(token_access_error_reason(&AdminError::Connect { tried: 2 }) == "Transport");
-        assert!(token_access_error_reason(&AdminError::NotControllerExhausted) == "Transport");
+        assert!(
+            token_access_error_reason(&AdminError::Connect {
+                tried: 2,
+                source: None
+            }) == "Transport"
+        );
+        assert!(
+            token_access_error_reason(&AdminError::Transport(
+                krabka_client_core::ClientError::Timeout(krabka_units::secs(30))
+            )) == "Transport"
+        );
         assert!(
             token_access_error_reason(&AdminError::Broker {
                 api: "CreateAcls",

@@ -30,12 +30,12 @@ clap = { workspace = true, features = ["env"] }
 krabka-client-admin = { version = "0.4.0" }
 krabka-client-core = { version = "0.4" }
 krabka-client-producer = { version = "0.4.0" }
-krabka-broker = { version = "0.4.0" }
+krabka-broker = { version = "0.6.1" }
 krabka-compression = { version = "0.4.0" }
-krabka-kraft-core = { version = "0.4.0" }
-krabka-logfmt = { version = "0.4.0" }
+krabka-kraft-core = { version = "0.6.1" }
+krabka-logfmt = { version = "0.6.1" }
 krabka-metadata = { version = "0.4.0" }
-krabka-object-store = { version = "0.4.0" }
+krabka-object-store = { version = "0.6.1" }
 krabka-schema-serde = { version = "0.4.0" }
 krabka-security = { workspace = true }
 krabka-units = { workspace = true }

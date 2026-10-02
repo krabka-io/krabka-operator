@@ -1,15 +1,15 @@
 //! `SchemaRegistry` reconciler.
 //!
-//! This reconciler renders a StatefulSet, a headless Service, and a
+//! This reconciler renders a `StatefulSet`, a headless Service, and a
 //! `ClusterIP` Service for the `krabka-schema-registry` binary. The
 //! `krabka.io/cluster` label associates them with a managed `Kafka`.
 //!
-//! The registry keeps no state on disk. It runs as a StatefulSet for the pod
+//! The registry keeps no state on disk. It runs as a `StatefulSet` for the pod
 //! DNS names. Each pod advertises
 //! `$(POD_NAME).<name>-sr-headless.<namespace>.svc.cluster.local`, and a
 //! secondary forwards writes to that URL of the primary. The headless Service
 //! publishes a record for a pod only when the pod sets both `hostname` and
-//! `subdomain`. The StatefulSet controller sets both. A Deployment sets
+//! `subdomain`. The `StatefulSet` controller sets both. A Deployment sets
 //! neither.
 
 use std::{collections::BTreeMap, sync::Arc};
@@ -518,10 +518,10 @@ fn validate_config(spec: &SchemaRegistrySpec) -> Result<(), String> {
     Ok(())
 }
 
-/// Stable label set for the StatefulSet `selector.matchLabels`, the pod
-/// template labels, and BOTH Services' `spec.selector`. StatefulSet selectors
+/// Stable label set for the `StatefulSet` `selector.matchLabels`, the pod
+/// template labels, and BOTH Services' `spec.selector`. `StatefulSet` selectors
 /// are immutable, so this map must NOT carry the version label. A value that
-/// churns there would make the StatefulSet un-updatable, and a mismatch between
+/// churns there would make the `StatefulSet` un-updatable, and a mismatch between
 /// the selector and the template would keep pods from becoming Ready.
 fn selector_labels(obj: &SchemaRegistry) -> BTreeMap<String, String> {
     let instance = obj.name_any();
@@ -697,7 +697,7 @@ fn render_statefulset(
 /// Delete the Deployment that an earlier operator build rendered for this
 /// registry.
 ///
-/// A Deployment cannot become a StatefulSet in place, and both would select
+/// A Deployment cannot become a `StatefulSet` in place, and both would select
 /// the same pods. The function deletes the Deployment only when this
 /// `SchemaRegistry` owns it, so a Deployment of the same name that a user
 /// made stays.
@@ -709,7 +709,7 @@ async fn delete_owned_deployment(
     let Some(deployment) = api.get_opt(name).await? else {
         return Ok(());
     };
-    let owned = owner.meta().uid.as_ref().is_some_and(|uid| {
+    let deployment_is_owned = owner.meta().uid.as_ref().is_some_and(|uid| {
         deployment
             .metadata
             .owner_references
@@ -717,7 +717,7 @@ async fn delete_owned_deployment(
             .flatten()
             .any(|reference| &reference.uid == uid)
     });
-    if !owned {
+    if !deployment_is_owned {
         return Ok(());
     }
     match api.delete(name, &DeleteParams::background()).await {

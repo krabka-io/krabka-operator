@@ -1080,14 +1080,14 @@ pub(crate) async fn ensure_broker_keystore(
         }
     });
     let pruned: Vec<i32> = pruned_ids.into_iter().collect();
-    let leaf_material = data.iter().filter(|(key, _)| key.ends_with(".crt")).fold(
-        String::new(),
-        |mut material, (_, value)| {
+    let leaf_material = data
+        .iter()
+        .filter(|(key, _)| key.strip_suffix(".crt").is_some())
+        .fold(String::new(), |mut material, (_, value)| {
             material.push('\x1E');
             material.push_str(&String::from_utf8_lossy(&value.0));
             material
-        },
-    );
+        });
 
     let mut labels = BTreeMap::new();
     labels.insert(

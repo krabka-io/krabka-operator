@@ -1637,6 +1637,36 @@ async fn reconcile_valid_listener_resources(
     })
 }
 
+fn metrics_ready_condition(outcome: Option<&Result<(), ReconcileError>>) -> KafkaCondition {
+    match outcome {
+        None => condition(
+            "MetricsReady",
+            "False",
+            "Disabled",
+            "spec.metricsConfig is not set",
+        ),
+        Some(Ok(())) => condition(
+            "MetricsReady",
+            "True",
+            "Available",
+            "metrics resources reconciled",
+        ),
+        Some(Err(ReconcileError::MetricsMutuallyExclusive)) => condition(
+            "MetricsReady",
+            "False",
+            "MutuallyExclusive",
+            "podMonitor and serviceMonitor are mutually exclusive",
+        ),
+        Some(Err(ReconcileError::PrometheusOperatorCrdsMissing)) => condition(
+            "MetricsReady",
+            "False",
+            "PrometheusOperatorCrdsMissing",
+            "monitoring.coreos.com/v1 is not served by the API server",
+        ),
+        Some(Err(_)) => condition("MetricsReady", "False", "Error", "metrics reconcile failed"),
+    }
+}
+
 async fn finalize_kafka(input: FinalizeKafkaInput<'_>) -> Result<Action, ReconcileError> {
     let FinalizeKafkaInput {
         obj,
@@ -1667,33 +1697,7 @@ async fn finalize_kafka(input: FinalizeKafkaInput<'_>) -> Result<Action, Reconci
     // PrometheusOperatorCrdsMissing are reported via the condition only —
     // the reconcile continues so the rest of the status patch lands.
     let metrics_outcome = crate::controller::metrics::reconcile_metrics(ctx, obj, name, ns).await;
-    let metrics_condition = match &metrics_outcome {
-        None => condition(
-            "MetricsReady",
-            "False",
-            "Disabled",
-            "spec.metricsConfig is not set",
-        ),
-        Some(Ok(())) => condition(
-            "MetricsReady",
-            "True",
-            "Available",
-            "metrics resources reconciled",
-        ),
-        Some(Err(ReconcileError::MetricsMutuallyExclusive)) => condition(
-            "MetricsReady",
-            "False",
-            "MutuallyExclusive",
-            "podMonitor and serviceMonitor are mutually exclusive",
-        ),
-        Some(Err(ReconcileError::PrometheusOperatorCrdsMissing)) => condition(
-            "MetricsReady",
-            "False",
-            "PrometheusOperatorCrdsMissing",
-            "monitoring.coreos.com/v1 is not served by the API server",
-        ),
-        Some(Err(_)) => condition("MetricsReady", "False", "Error", "metrics reconcile failed"),
-    };
+    let metrics_condition = metrics_ready_condition(metrics_outcome.as_ref());
 
     // NetworkPolicy reconcile (opt-in via spec.networkPolicy).
     // Inter-broker port: the listener whose name matches the effective
@@ -2023,8 +2027,13 @@ async fn reconcile_metadata_version(
             )
         })?;
     let mut admin = admin.lock().await;
+    let upgrade_type = if target_level < finalized_level {
+        krabka_client_admin::UpgradeType::SafeDowngrade
+    } else {
+        krabka_client_admin::UpgradeType::Upgrade
+    };
     admin
-        .update_metadata_version(target_level, target_level < finalized_level, secs(30))
+        .update_metadata_version(target_level, upgrade_type, secs(30))
         .await
         .map_err(|error| {
             condition(

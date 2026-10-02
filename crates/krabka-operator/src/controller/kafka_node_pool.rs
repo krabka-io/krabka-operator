@@ -1426,6 +1426,60 @@ pub(crate) fn render_statefulset(
     render_statefulset_with_shell(parent, pool, broker_image, SHELL_IMAGE)
 }
 
+fn render_pod_metadata(
+    pool: &KafkaNodePool,
+    pod_labels: &mut BTreeMap<String, String>,
+    process_roles: &str,
+) -> Result<serde_json::Value, ReconcileError> {
+    // Merge user-provided pod metadata under operator-owned labels.
+    // Operator labels win collisions; user labels fill in the rest.
+    if pool.spec.roles.contains(&NodeRole::Controller) {
+        pod_labels.insert("krabka.io/controller-role".into(), "true".into());
+    }
+    if pool.spec.roles.contains(&NodeRole::Broker) {
+        pod_labels.insert("krabka.io/broker-role".into(), "true".into());
+    }
+    let mut pod_annotations: BTreeMap<String, String> = BTreeMap::new();
+    if let Some(meta) = pool
+        .spec
+        .template
+        .as_ref()
+        .and_then(|t| t.metadata.as_ref())
+    {
+        for (k, v) in &meta.labels {
+            pod_labels.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        for (k, v) in &meta.annotations {
+            pod_annotations.insert(k.clone(), v.clone());
+        }
+    }
+
+    // Operator-owned annotation: propagate `krabka.io/config-hash` from
+    // the pool's metadata label (set by the Kafka reconciler) into the
+    // pod-template annotation. Placed after the user-annotation merge so
+    // the operator wins on a same-key collision — the hash is the
+    // mechanism that triggers a rolling restart on config drift.
+    if let Some(hash) = pool
+        .metadata
+        .labels
+        .as_ref()
+        .and_then(|l| l.get("krabka.io/config-hash"))
+    {
+        pod_annotations.insert("krabka.io/config-hash".into(), hash.clone());
+    }
+    pod_annotations.insert(
+        NODE_ID_START_ANNOTATION.into(),
+        pool.spec.node_id_start.to_string(),
+    );
+    pod_annotations.insert(PROCESS_ROLES_ANNOTATION.into(), process_roles.into());
+
+    let mut template_meta = json!({ "labels": pod_labels });
+    if !pod_annotations.is_empty() {
+        template_meta["annotations"] = serde_json::to_value(&pod_annotations)?;
+    }
+    Ok(template_meta)
+}
+
 fn render_statefulset_with_shell(
     parent: &Kafka,
     pool: &KafkaNodePool,
@@ -1548,54 +1602,9 @@ fn render_statefulset_with_shell(
         client_resource_policy,
     });
 
-    // Merge user-provided pod metadata under operator-owned labels.
-    // Operator labels win collisions; user labels fill in the rest.
     let mut pod_labels = labels.clone();
-    if pool.spec.roles.contains(&NodeRole::Controller) {
-        pod_labels.insert("krabka.io/controller-role".into(), "true".into());
-    }
-    if pool.spec.roles.contains(&NodeRole::Broker) {
-        pod_labels.insert("krabka.io/broker-role".into(), "true".into());
-    }
-    let mut pod_annotations: BTreeMap<String, String> = BTreeMap::new();
-    if let Some(meta) = pool
-        .spec
-        .template
-        .as_ref()
-        .and_then(|t| t.metadata.as_ref())
-    {
-        for (k, v) in &meta.labels {
-            pod_labels.entry(k.clone()).or_insert_with(|| v.clone());
-        }
-        for (k, v) in &meta.annotations {
-            pod_annotations.insert(k.clone(), v.clone());
-        }
-    }
-
-    // Operator-owned annotation: propagate `krabka.io/config-hash` from
-    // the pool's metadata label (set by the Kafka reconciler) into the
-    // pod-template annotation. Placed after the user-annotation merge so
-    // the operator wins on a same-key collision — the hash is the
-    // mechanism that triggers a rolling restart on config drift.
-    if let Some(hash) = pool
-        .metadata
-        .labels
-        .as_ref()
-        .and_then(|l| l.get("krabka.io/config-hash"))
-    {
-        pod_annotations.insert("krabka.io/config-hash".into(), hash.clone());
-    }
     let process_roles = role_mask_name(role_mask(&pool.spec.roles));
-    pod_annotations.insert(
-        NODE_ID_START_ANNOTATION.into(),
-        pool.spec.node_id_start.to_string(),
-    );
-    pod_annotations.insert(PROCESS_ROLES_ANNOTATION.into(), process_roles.into());
-
-    let mut template_meta = json!({ "labels": pod_labels });
-    if !pod_annotations.is_empty() {
-        template_meta["annotations"] = serde_json::to_value(&pod_annotations)?;
-    }
+    let template_meta = render_pod_metadata(pool, &mut pod_labels, process_roles)?;
 
     let mut pod_spec = json!({
         "securityContext": {
@@ -2099,8 +2108,7 @@ async fn operator_bootstrap_address(
             .ok_or_else(|| ReconcileError::Malformed("operator-admin Service port missing".into()))
     })?;
     Ok(format!(
-        "{cluster}-broker-headless.{namespace}.svc.cluster.local:{}",
-        port
+        "{cluster}-broker-headless.{namespace}.svc.cluster.local:{port}"
     ))
 }
 
@@ -2266,7 +2274,11 @@ async fn reconcile_deletion(
                 return Ok(common::requeue(ctx.config.controller_dependency_requeue));
             }
             if let Err(error) = admin
-                .remove_raft_voter(cluster_id, target.node_id, target.directory_id)
+                .remove_raft_voter(
+                    Some(&cluster_id.to_string()),
+                    target.node_id,
+                    target.directory_id,
+                )
                 .await
             {
                 tracing::warn!(%error, node_id = target.node_id, "RemoveRaftVoter failed during pool deletion");
@@ -2818,7 +2830,11 @@ async fn reconcile_controller_scale_down(
         .await?;
     let mut leader_admin = leader_admin.lock().await;
     if let Err(error) = leader_admin
-        .remove_raft_voter(cluster_id, target.node_id, target.directory_id)
+        .remove_raft_voter(
+            Some(&cluster_id.to_string()),
+            target.node_id,
+            target.directory_id,
+        )
         .await
     {
         drop(leader_admin);

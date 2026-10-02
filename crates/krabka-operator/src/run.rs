@@ -112,10 +112,10 @@ pub async fn run(config: OperatorConfig) -> anyhow::Result<()> {
     match leadership.release(lease_duration).await {
         Ok(Release::Released) => tracing::info!("released the leader-election lease"),
         Ok(Release::NotHeld) => {
-            tracing::info!("leader-election lease is not held; nothing to release")
+            tracing::info!("leader-election lease is not held; nothing to release");
         }
         Ok(Release::Conflict) => {
-            tracing::warn!("leader-election lease changed during the release; left as it is")
+            tracing::warn!("leader-election lease changed during the release; left as it is");
         }
         Err(error) => tracing::warn!(%error, "leader-election lease not released; it expires"),
     }

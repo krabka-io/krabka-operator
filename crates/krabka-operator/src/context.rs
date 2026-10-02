@@ -157,12 +157,18 @@ impl Context {
                 .map_err(krabka_client_admin::AdminError::Protocol)?,
                 security: Some(Box::new(krabka_client_core::ClientSecurity {
                     protocol: ListenerProtocol::Ssl,
-                    tls: Some(krabka_client_core::TlsConnectorConfig {
-                        trust_roots_pem: Some(ca_path),
-                        server_name: format!(
-                            "{cluster}-broker-headless.{namespace}.svc.cluster.local"
-                        ),
-                        client_identity: Some((cert_path, key_path)),
+                    tls: Some({
+                        let mut tls = krabka_client_core::TlsConnectorConfig::default();
+                        tls.trust_store =
+                            krabka_client_core::security::TrustStore::PemFile(ca_path);
+                        tls.server_name =
+                            format!("{cluster}-broker-headless.{namespace}.svc.cluster.local");
+                        tls.key_store = Some(krabka_client_core::security::KeyStore::PemFiles {
+                            certificate_chain: cert_path,
+                            private_key: key_path,
+                            key_password: None,
+                        });
+                        tls
                     }),
                     sasl: None,
                     sasl_host: None,

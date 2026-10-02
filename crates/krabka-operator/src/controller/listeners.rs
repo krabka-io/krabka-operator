@@ -1675,7 +1675,7 @@ mod tests {
     fn authorization_rejects_external_identity_providers() {
         let oauth = oauth_listener("oauth", 9095, true, oauth_cfg_minimal());
         assert!(
-            validate_operator_principal_isolation(&[oauth.clone()], false).is_ok(),
+            validate_operator_principal_isolation(std::slice::from_ref(&oauth), false).is_ok(),
             "without a super-user bypass there is no reserved identity to forge"
         );
         let err = validate_operator_principal_isolation(&[oauth], true).unwrap_err();
