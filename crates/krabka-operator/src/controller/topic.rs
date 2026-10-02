@@ -11,8 +11,8 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use futures::StreamExt as _;
 use krabka_client_admin::{
     AdminClientLike, AlterConfigOp, ConfigResource, CreatePartitionsOp, CreateTopicSpec,
-    DescribeConfigsOptions, IncrementalAlterConfigsOptions, TopicMutationOptions,
-    TopicReplicationStatus,
+    DescribeConfigsOptions, DescribeConfigsResults, IncrementalAlterConfigsOptions,
+    TopicMutationOptions, TopicReplicationStatus,
 };
 use kube::{
     Resource, ResourceExt as _,
@@ -336,17 +336,10 @@ async fn reconcile_replication_factor(
     )))
 }
 
-// linear pipeline; extraction hurts more than helps
-async fn topic_config_overrides(
-    admin: &mut (dyn AdminClientLike + Send),
+fn topic_config_overrides(
+    mut results: DescribeConfigsResults,
     resource: &ConfigResource,
 ) -> Result<BTreeMap<String, String>, krabka_client_admin::AdminError> {
-    let mut results = admin
-        .describe_configs(
-            std::slice::from_ref(resource),
-            DescribeConfigsOptions::default(),
-        )
-        .await?;
     results
         .remove(resource)
         .ok_or_else(|| {
@@ -499,7 +492,14 @@ async fn reconcile_inner(
             // Config diff
             let desired = obj.spec.config.clone().unwrap_or_default();
             let resource = ConfigResource::topic(topic_name.clone());
-            let overrides = match topic_config_overrides(&mut *admin, &resource).await {
+            let overrides = match admin
+                .describe_configs(
+                    std::slice::from_ref(&resource),
+                    DescribeConfigsOptions::default(),
+                )
+                .await
+                .and_then(|results| topic_config_overrides(results, &resource))
+            {
                 Ok(overrides) => overrides,
                 Err(e) => {
                     tracing::warn!(error = %e, "DescribeConfigs failed");
@@ -735,9 +735,114 @@ async fn patch_status(
 #[cfg(test)]
 mod tests {
     use assert2::assert;
+    use krabka_client_admin::{
+        AdminError, Config, ConfigEntry, ConfigSource, ConfigType, KafkaError,
+    };
 
     use super::*;
     use crate::crd::{KafkaCondition, KafkaSpec, KafkaStatus, ListenerStatus, ListenerType};
+
+    #[test]
+    fn topic_config_overrides_preserves_resource_errors() {
+        let resource = ConfigResource::topic("orders");
+        for (code, name, message) in [
+            (29, "TOPIC_AUTHORIZATION_FAILED", Some("denied".to_string())),
+            (3, "UNKNOWN_TOPIC_OR_PARTITION", None),
+        ] {
+            let results = BTreeMap::from([(
+                resource.clone(),
+                Err(KafkaError {
+                    code,
+                    name,
+                    message: message.clone(),
+                }),
+            )]);
+            let error = topic_config_overrides(results, &resource).expect_err("resource error");
+            let AdminError::Broker {
+                api,
+                code: actual_code,
+                name: actual_name,
+                message: actual_message,
+            } = error
+            else {
+                panic!("expected broker error, got {error:?}");
+            };
+            assert!(
+                (api, actual_code, actual_name, actual_message)
+                    == ("DescribeConfigs", code, name, message)
+            );
+        }
+    }
+
+    #[test]
+    fn topic_config_overrides_requires_the_requested_resource() {
+        let resource = ConfigResource::topic("orders");
+        for results in [
+            BTreeMap::new(),
+            BTreeMap::from([(ConfigResource::topic("other"), Ok(Config::default()))]),
+        ] {
+            let error = topic_config_overrides(results, &resource).expect_err("missing topic");
+            let AdminError::Protocol(message) = error else {
+                panic!("expected protocol error, got {error:?}");
+            };
+            assert!(message == "DescribeConfigs omitted the topic");
+        }
+    }
+
+    #[test]
+    fn topic_config_overrides_excludes_inherited_and_withheld_values() {
+        let resource = ConfigResource::topic("orders");
+        let entries = [
+            (
+                "retention.ms",
+                Some("3600000"),
+                ConfigSource::DynamicTopicConfig,
+            ),
+            (
+                "segment.bytes",
+                Some("1048576"),
+                ConfigSource::DynamicBrokerConfig,
+            ),
+            (
+                "cleanup.policy",
+                Some("delete"),
+                ConfigSource::DefaultConfig,
+            ),
+            ("hidden", None, ConfigSource::DynamicTopicConfig),
+        ]
+        .into_iter()
+        .map(|(name, value, source)| {
+            (
+                name.to_string(),
+                ConfigEntry {
+                    name: name.to_string(),
+                    value: value.map(str::to_string),
+                    source,
+                    is_sensitive: value.is_none(),
+                    is_read_only: false,
+                    synonyms: vec![],
+                    config_type: ConfigType::Unknown,
+                    documentation: None,
+                },
+            )
+        })
+        .collect();
+        let results = BTreeMap::from([
+            (resource.clone(), Ok(Config { entries })),
+            (
+                ConfigResource::topic("other"),
+                Err(KafkaError {
+                    code: 29,
+                    name: "TOPIC_AUTHORIZATION_FAILED",
+                    message: None,
+                }),
+            ),
+        ]);
+        assert!(
+            topic_config_overrides(results, &resource).expect("topic overrides")
+                == BTreeMap::from([("retention.ms".to_string(), "3600000".to_string())])
+        );
+    }
 
     fn kafka_ready(name: &str, namespace: &str, listener_port: i32) -> Kafka {
         let mut k = Kafka::new(

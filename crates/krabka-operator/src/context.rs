@@ -35,6 +35,22 @@ impl AdminClientHandle {
 /// that many callers can share.
 pub type RebalancerClientHandle = Arc<dyn RebalancerClientLike>;
 
+fn admin_tls_config(
+    cluster: &str,
+    namespace: &str,
+    material: &std::path::Path,
+) -> krabka_client_core::TlsConnectorConfig {
+    let mut tls = krabka_client_core::TlsConnectorConfig::default();
+    tls.trust_store = krabka_client_core::security::TrustStore::PemFile(material.join("ca.crt"));
+    tls.server_name = format!("{cluster}-broker-headless.{namespace}.svc.cluster.local");
+    tls.key_store = Some(krabka_client_core::security::KeyStore::PemFiles {
+        certificate_chain: material.join("user.crt"),
+        private_key: material.join("user.key"),
+        key_password: None,
+    });
+    tls
+}
+
 /// Shared context for each reconciler.
 ///
 /// A clone is cheap. Every field is an `Arc` or is shared with interior
@@ -157,19 +173,7 @@ impl Context {
                 .map_err(krabka_client_admin::AdminError::Protocol)?,
                 security: Some(Box::new(krabka_client_core::ClientSecurity {
                     protocol: ListenerProtocol::Ssl,
-                    tls: Some({
-                        let mut tls = krabka_client_core::TlsConnectorConfig::default();
-                        tls.trust_store =
-                            krabka_client_core::security::TrustStore::PemFile(ca_path);
-                        tls.server_name =
-                            format!("{cluster}-broker-headless.{namespace}.svc.cluster.local");
-                        tls.key_store = Some(krabka_client_core::security::KeyStore::PemFiles {
-                            certificate_chain: cert_path,
-                            private_key: key_path,
-                            key_password: None,
-                        });
-                        tls
-                    }),
+                    tls: Some(admin_tls_config(cluster, namespace, material.path())),
                     sasl: None,
                     sasl_host: None,
                 })),
@@ -256,5 +260,55 @@ impl Context {
             .lock()
             .await
             .insert(endpoint.to_string(), client);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use assert2::assert;
+    use krabka_client_core::security::{KeyStore, TlsVersion, TrustStore};
+
+    use super::*;
+
+    #[test]
+    fn admin_tls_uses_cluster_identity_and_verifies_broker_hostname() {
+        let material = tempfile::tempdir().expect("identity directory");
+        for (cluster, namespace, server_name) in [
+            (
+                "orders",
+                "production",
+                "orders-broker-headless.production.svc.cluster.local",
+            ),
+            (
+                "metrics",
+                "observability",
+                "metrics-broker-headless.observability.svc.cluster.local",
+            ),
+        ] {
+            let tls = admin_tls_config(cluster, namespace, material.path());
+            assert!(
+                (
+                    tls.trust_store,
+                    tls.key_store,
+                    tls.server_name,
+                    tls.hostname_verification,
+                    tls.protocol,
+                    tls.enabled_protocols,
+                    tls.cipher_suites,
+                ) == (
+                    TrustStore::PemFile(material.path().join("ca.crt")),
+                    Some(KeyStore::PemFiles {
+                        certificate_chain: material.path().join("user.crt"),
+                        private_key: material.path().join("user.key"),
+                        key_password: None,
+                    }),
+                    server_name.to_string(),
+                    true,
+                    TlsVersion::Tls13,
+                    vec![TlsVersion::Tls12, TlsVersion::Tls13],
+                    None,
+                )
+            );
+        }
     }
 }
