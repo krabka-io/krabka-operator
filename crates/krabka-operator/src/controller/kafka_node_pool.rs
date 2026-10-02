@@ -3814,13 +3814,11 @@ mod tests {
 
     #[test]
     fn statefulset_init_clamps_out_of_range_version_to_max() {
-        // kafka_version "4.1.0" normalises to "4.1", which is NOT yet in the
-        // broker's supported metadata.version table. Without clamping,
-        // `krabka format --release-version 4.1` would exit non-zero and
-        // crash-loop the init container. The clamp must silently fall back to
-        // the broker's MAX short form ("4.0") so the pod can boot.
+        // Use an unsupported release rather than a version the broker may add
+        // to its metadata.version table. The init container must fall back to
+        // the broker's MAX short form so it can boot.
         let mut parent = parent_fixture("demo");
-        parent.spec.kafka_version = "4.1.0".into();
+        parent.spec.kafka_version = "99.0.0".into();
         // No spec.metadata_version pin, no status.metadataVersion.
         let pool = pool_fixture("brokers", "demo", 1);
         let sts = render_statefulset(&parent, &pool, DEFAULT_BROKER_IMAGE).unwrap();
@@ -3839,7 +3837,7 @@ mod tests {
         assert!(
             mv.value.as_deref() == Some(max_short),
             "out-of-range kafka_version must clamp to MAX short form ({max_short}), \
-             not the unsupported \"4.1\""
+             not the unsupported \"99.0\""
         );
     }
 
