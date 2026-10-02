@@ -39,8 +39,10 @@ use k8s_openapi::{
     api::core::v1::Secret,
     apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference},
 };
-use krabka_client_admin::AdminError;
-use krabka_metadata::DelegationToken;
+use krabka_client_admin::{
+    AdminError, CreateDelegationTokenOptions, DelegationToken, DescribeDelegationTokenOptions,
+    ExpireDelegationTokenOptions, RenewDelegationTokenOptions,
+};
 use krabka_security::KafkaPrincipal;
 use krabka_units::{Time, convert::TimeExt as _, hours};
 use kube::{
@@ -134,7 +136,7 @@ pub(crate) trait DelegationTokenAdmin: Send + Sync {
     ///
     /// The broker clamps the new value at `max_timestamp_ms`. A lifetime
     /// of `-1` gives the default renew period of the broker.
-    async fn renew_delegation_token(&self, hmac: &[u8]) -> Result<DelegationToken, AdminError>;
+    async fn renew_delegation_token(&self, hmac: &[u8]) -> Result<i64, AdminError>;
 
     /// Tombstones the token immediately. A period of `-1` means
     /// expire-now.
@@ -336,7 +338,9 @@ pub(crate) async fn reconcile(
         ReconcileDecision::Renew => {
             let existing_token = matching.expect("Renew implies existing token");
             match admin.renew_delegation_token(&existing_token.hmac).await {
-                Ok(renewed) => {
+                Ok(expiry_timestamp_ms) => {
+                    let mut renewed = existing_token;
+                    renewed.expiry_timestamp_ms = expiry_timestamp_ms;
                     let r = compute_requeue(
                         &renewed,
                         auth,
@@ -938,19 +942,34 @@ impl DelegationTokenAdmin for crate::context::AdminClientHandle {
         max_lifetime: Option<Time>,
     ) -> Result<DelegationToken, AdminError> {
         let mut admin = self.lock().await;
-        admin
-            .create_delegation_token_as_owner(owner_principal_name, renewers, max_lifetime)
-            .await
+        let options = CreateDelegationTokenOptions {
+            owner: Some(KafkaPrincipal {
+                principal_type: "User".into(),
+                name: owner_principal_name.into(),
+            }),
+            renewers: renewers
+                .iter()
+                .map(|principal| principal.parse())
+                .collect::<Result<_, _>>()
+                .map_err(AdminError::InvalidArgument)?,
+            max_lifetime,
+        };
+        admin.create_delegation_token(&options).await
     }
 
-    async fn renew_delegation_token(&self, hmac: &[u8]) -> Result<DelegationToken, AdminError> {
+    async fn renew_delegation_token(&self, hmac: &[u8]) -> Result<i64, AdminError> {
         let mut admin = self.lock().await;
-        admin.renew_delegation_token(hmac).await
+        admin
+            .renew_delegation_token(hmac, RenewDelegationTokenOptions::default())
+            .await
     }
 
     async fn expire_delegation_token(&self, hmac: &[u8]) -> Result<(), AdminError> {
         let mut admin = self.lock().await;
-        admin.expire_delegation_token(hmac).await
+        admin
+            .expire_delegation_token(hmac, ExpireDelegationTokenOptions::default())
+            .await
+            .map(|_| ())
     }
 
     async fn describe_delegation_tokens_owned_by(
@@ -958,9 +977,14 @@ impl DelegationTokenAdmin for crate::context::AdminClientHandle {
         owner_principal: &str,
     ) -> Result<Vec<DelegationToken>, AdminError> {
         let mut admin = self.lock().await;
-        admin
-            .describe_delegation_tokens_owned_by(owner_principal)
-            .await
+        let options = DescribeDelegationTokenOptions {
+            owners: Some(vec![
+                owner_principal
+                    .parse()
+                    .map_err(AdminError::InvalidArgument)?,
+            ]),
+        };
+        admin.describe_delegation_token(&options).await
     }
 }
 
@@ -1000,6 +1024,7 @@ mod tests {
         DelegationToken {
             token_id: "t1".into(),
             owner: kp("User", "alice"),
+            token_requester: kp("User", "alice"),
             hmac: vec![0xAB; 32],
             issue_timestamp_ms: 0,
             expiry_timestamp_ms: expiry,
@@ -1141,6 +1166,7 @@ mod tests {
             let token = DelegationToken {
                 token_id: format!("tok-{}", self.tokens.lock().unwrap().len()),
                 owner: kp("User", owner_principal_name),
+                token_requester: kp("User", "operator"),
                 hmac: vec![0xCD; 32],
                 issue_timestamp_ms: now,
                 expiry_timestamp_ms: now + self.create_expiry_offset_ms,
@@ -1151,7 +1177,7 @@ mod tests {
             Ok(token)
         }
 
-        async fn renew_delegation_token(&self, hmac: &[u8]) -> Result<DelegationToken, AdminError> {
+        async fn renew_delegation_token(&self, hmac: &[u8]) -> Result<i64, AdminError> {
             self.calls.lock().unwrap().push(MockCall::Renew {
                 hmac: hmac.to_vec(),
             });
@@ -1171,7 +1197,7 @@ mod tests {
             let max = guard[pos].max_timestamp_ms;
             guard[pos].expiry_timestamp_ms =
                 (guard[pos].expiry_timestamp_ms + self.renew_delta_ms).min(max);
-            Ok(guard[pos].clone())
+            Ok(guard[pos].expiry_timestamp_ms)
         }
 
         async fn expire_delegation_token(&self, hmac: &[u8]) -> Result<(), AdminError> {
@@ -1375,6 +1401,7 @@ mod tests {
         let existing = DelegationToken {
             token_id: "preexisting".into(),
             owner: kp("User", "alice"),
+            token_requester: kp("User", "alice"),
             hmac: vec![0xEE; 32],
             issue_timestamp_ms: 0,
             expiry_timestamp_ms: 10_000,

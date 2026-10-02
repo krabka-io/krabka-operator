@@ -2,8 +2,8 @@
 //!
 //! These tests assert on the request sequence that the reconciler issues
 //! on the kube side: the Kafka GET, the SSA applies of the Service and the
-//! StatefulSet, the removal of an owned Deployment, and the status patch.
-//! They also assert on the rendered StatefulSet container args, its env,
+//! `StatefulSet`, the removal of an owned Deployment, and the status patch.
+//! They also assert on the rendered `StatefulSet` container args, its env,
 //! and its Secret mounts.
 
 use std::sync::Arc;

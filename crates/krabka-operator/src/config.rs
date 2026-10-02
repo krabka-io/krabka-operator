@@ -106,7 +106,7 @@ pub struct OperatorConfig {
     #[arg(long, env = "DEFAULT_BROKER_IMAGE")]
     pub default_broker_image: Option<String>,
 
-    /// BusyBox image copied into distroless broker pods for lifecycle scripts.
+    /// `BusyBox` image copied into distroless broker pods for lifecycle scripts.
     #[arg(long, env = "DEFAULT_SHELL_IMAGE")]
     pub default_shell_image: Option<String>,
 

@@ -15,17 +15,19 @@ use std::{
 };
 
 use krabka_client_admin::{
-    AclEntry, AclEntryFilter, AdminClientLike, AdminError, AlterConfigsOutcome, CreateAclOutcome,
-    CreatePartitionsOp, CreatePartitionsOutcome, CreateTopicOutcome, CreateTopicSpec,
-    DeleteAclFilterOutcome, DeleteRecordsOp, DeleteRecordsOutcome, DeleteTopicOutcome,
-    IncrementalAlterOp, KafkaError, MetadataQuorum, MetadataVersionUpdate, PartitionAssignment,
-    QuotaOp, ScramDeletion, ScramUpsertion, ScramUserOutcome, TopicConfigOverrides, TopicMetadata,
-    TopicMetadataEntry, TopicReplicationStatus, UserQuotaConfig,
+    AclEntry, AclEntryFilter, AdminClientLike, AdminError, AlterConfigOp, AlterConfigOpType,
+    AlterConfigsResults, Config, ConfigEntry, ConfigResource, ConfigSource, ConfigType,
+    CreateAclOutcome, CreateDelegationTokenOptions, CreatePartitionsOp, CreatePartitionsOutcome,
+    CreateTopicOutcome, CreateTopicSpec, DelegationToken, DeleteAclFilterOutcome, DeleteRecordsOp,
+    DeleteRecordsOutcome, DeleteTopicOutcome, DescribeConfigsOptions, DescribeConfigsResults,
+    DescribeDelegationTokenOptions, ExpireDelegationTokenOptions, IncrementalAlterConfigsOptions,
+    KafkaError, MetadataQuorum, MetadataVersionUpdate, PartitionAssignment, QuotaOp,
+    RenewDelegationTokenOptions, ScramDeletion, ScramUpsertion, ScramUserOutcome, TopicMetadata,
+    TopicMetadataEntry, TopicMutationOptions, TopicReplicationStatus, UpgradeType, UserQuotaConfig,
 };
 use krabka_client_core::ClientError;
-use krabka_metadata::DelegationToken;
 use krabka_security::KafkaPrincipal;
-use krabka_units::{Time, convert::TimeExt as _, days};
+use krabka_units::{Time, convert::TimeExt as _, days, secs};
 
 /// Per-RPC error to inject. `Broker` surfaces as a per-outcome error
 /// (matches how Kafka reports per-topic errors); `Transport` surfaces as
@@ -90,7 +92,7 @@ pub enum RecordedCall {
     DeleteRecords(Vec<DeleteRecordsOp>),
     CreatePartitions(Vec<CreatePartitionsOp>),
     DescribeConfigs(Vec<String>),
-    IncrementalAlterConfigs(Vec<IncrementalAlterOp>),
+    IncrementalAlterConfigs(BTreeMap<ConfigResource, Vec<AlterConfigOp>>),
     AlterUserScramCredentials {
         upsertions: Vec<ScramUpsertion>,
         deletions: Vec<ScramDeletion>,
@@ -327,7 +329,7 @@ impl AdminClientLike for FakeAdminClient {
     async fn update_metadata_version(
         &mut self,
         level: i16,
-        safe_downgrade: bool,
+        upgrade_type: UpgradeType,
         timeout: Time,
     ) -> Result<MetadataVersionUpdate, AdminError> {
         self.recorded_calls
@@ -335,7 +337,7 @@ impl AdminClientLike for FakeAdminClient {
             .unwrap()
             .push(RecordedCall::UpdateMetadataVersion {
                 level,
-                safe_downgrade,
+                safe_downgrade: upgrade_type == UpgradeType::SafeDowngrade,
                 timeout,
             });
         if let Some(error) = self
@@ -382,7 +384,7 @@ impl AdminClientLike for FakeAdminClient {
 
     async fn remove_raft_voter(
         &mut self,
-        cluster_id: uuid::Uuid,
+        cluster_id: Option<&str>,
         node_id: i32,
         directory_id: uuid::Uuid,
     ) -> Result<(), AdminError> {
@@ -390,7 +392,11 @@ impl AdminClientLike for FakeAdminClient {
             .lock()
             .unwrap()
             .push(RecordedCall::RemoveRaftVoter {
-                cluster_id,
+                cluster_id: cluster_id
+                    .map(str::parse)
+                    .transpose()
+                    .map_err(|error| AdminError::Protocol(format!("invalid cluster id: {error}")))?
+                    .unwrap_or_default(),
                 node_id,
                 directory_id,
             });
@@ -525,9 +531,12 @@ impl AdminClientLike for FakeAdminClient {
     async fn create_topics(
         &mut self,
         specs: &[CreateTopicSpec],
-        timeout: Time,
+        options: TopicMutationOptions,
     ) -> Result<Vec<CreateTopicOutcome>, AdminError> {
-        self.create_topic_timeouts.lock().unwrap().push(timeout);
+        self.create_topic_timeouts
+            .lock()
+            .unwrap()
+            .push(options.timeout.unwrap_or_else(|| secs(60)));
         self.recorded_calls
             .lock()
             .unwrap()
@@ -550,6 +559,7 @@ impl AdminClientLike for FakeAdminClient {
                                 name,
                                 message: message.clone(),
                             }),
+                            throttle_time: None,
                         })
                         .collect());
                 }
@@ -576,6 +586,7 @@ impl AdminClientLike for FakeAdminClient {
                     name: s.name.clone(),
                     topic_id: Some(id),
                     error: None,
+                    throttle_time: None,
                 }
             })
             .collect();
@@ -585,9 +596,12 @@ impl AdminClientLike for FakeAdminClient {
     async fn delete_topics(
         &mut self,
         names: &[&str],
-        timeout: Time,
+        options: TopicMutationOptions,
     ) -> Result<Vec<DeleteTopicOutcome>, AdminError> {
-        self.delete_topic_timeouts.lock().unwrap().push(timeout);
+        self.delete_topic_timeouts
+            .lock()
+            .unwrap()
+            .push(options.timeout.unwrap_or_else(|| secs(60)));
         self.recorded_calls
             .lock()
             .unwrap()
@@ -611,6 +625,7 @@ impl AdminClientLike for FakeAdminClient {
                                 name,
                                 message: message.clone(),
                             }),
+                            throttle_time: None,
                         })
                         .collect());
                 }
@@ -628,6 +643,7 @@ impl AdminClientLike for FakeAdminClient {
                 DeleteTopicOutcome {
                     name: (*n).to_string(),
                     error: None,
+                    throttle_time: None,
                 }
             })
             .collect();
@@ -637,7 +653,7 @@ impl AdminClientLike for FakeAdminClient {
     async fn create_partitions(
         &mut self,
         ops: &[CreatePartitionsOp],
-        _timeout: Time,
+        _options: TopicMutationOptions,
     ) -> Result<Vec<CreatePartitionsOutcome>, AdminError> {
         self.recorded_calls
             .lock()
@@ -660,6 +676,7 @@ impl AdminClientLike for FakeAdminClient {
                                 name,
                                 message: message.clone(),
                             }),
+                            throttle_time: None,
                         })
                         .collect());
                 }
@@ -676,6 +693,7 @@ impl AdminClientLike for FakeAdminClient {
                 CreatePartitionsOutcome {
                     name: op.name.clone(),
                     error: None,
+                    throttle_time: None,
                 }
             })
             .collect();
@@ -704,13 +722,17 @@ impl AdminClientLike for FakeAdminClient {
 
     async fn describe_configs(
         &mut self,
-        topics: &[&str],
-    ) -> Result<Vec<TopicConfigOverrides>, AdminError> {
+        resources: &[ConfigResource],
+        _options: DescribeConfigsOptions,
+    ) -> Result<DescribeConfigsResults, AdminError> {
         self.recorded_calls
             .lock()
             .unwrap()
             .push(RecordedCall::DescribeConfigs(
-                topics.iter().map(|s| (*s).to_string()).collect(),
+                resources
+                    .iter()
+                    .map(|resource| resource.name.clone())
+                    .collect(),
             ));
         if let Some(inj) = self.injected.lock().unwrap().describe_configs.clone() {
             match inj {
@@ -743,29 +765,47 @@ impl AdminClientLike for FakeAdminClient {
             }
         }
         let store = self.topics.lock().unwrap();
-        Ok(topics
+        Ok(resources
             .iter()
-            .map(|t| {
-                let overrides = store
-                    .get(*t)
-                    .map(|s| s.config_overrides.clone())
+            .map(|resource| {
+                let entries = store
+                    .get(&resource.name)
+                    .map(|state| {
+                        state
+                            .config_overrides
+                            .iter()
+                            .map(|(name, value)| {
+                                (
+                                    name.clone(),
+                                    ConfigEntry {
+                                        name: name.clone(),
+                                        value: Some(value.clone()),
+                                        source: ConfigSource::DynamicTopicConfig,
+                                        is_sensitive: false,
+                                        is_read_only: false,
+                                        synonyms: Vec::new(),
+                                        config_type: ConfigType::Unknown,
+                                        documentation: None,
+                                    },
+                                )
+                            })
+                            .collect()
+                    })
                     .unwrap_or_default();
-                TopicConfigOverrides {
-                    topic: (*t).to_string(),
-                    overrides,
-                }
+                (resource.clone(), Ok(Config { entries }))
             })
             .collect())
     }
 
     async fn incremental_alter_configs(
         &mut self,
-        ops: &[IncrementalAlterOp],
-    ) -> Result<Vec<AlterConfigsOutcome>, AdminError> {
+        configs: &BTreeMap<ConfigResource, Vec<AlterConfigOp>>,
+        options: IncrementalAlterConfigsOptions,
+    ) -> Result<AlterConfigsResults, AdminError> {
         self.recorded_calls
             .lock()
             .unwrap()
-            .push(RecordedCall::IncrementalAlterConfigs(ops.to_vec()));
+            .push(RecordedCall::IncrementalAlterConfigs(configs.clone()));
         if let Some(inj) = self
             .injected
             .lock()
@@ -780,51 +820,55 @@ impl AdminClientLike for FakeAdminClient {
                     name,
                     message,
                 } => {
-                    let mut topics_touched: BTreeSet<String> = BTreeSet::new();
-                    for op in ops {
-                        match op {
-                            IncrementalAlterOp::Set { topic, .. }
-                            | IncrementalAlterOp::Delete { topic, .. } => {
-                                topics_touched.insert(topic.clone());
-                            }
-                        }
-                    }
-                    return Ok(topics_touched
-                        .into_iter()
-                        .map(|topic| AlterConfigsOutcome {
-                            topic,
-                            error: Some(KafkaError {
-                                code,
-                                name,
-                                message: message.clone(),
-                            }),
+                    return Ok(configs
+                        .keys()
+                        .map(|resource| {
+                            (
+                                resource.clone(),
+                                Err(KafkaError {
+                                    code,
+                                    name,
+                                    message: message.clone(),
+                                }),
+                            )
                         })
                         .collect());
                 }
                 InjectableError::BrokerToplevel { .. } => {}
             }
         }
-        let mut store = self.topics.lock().unwrap();
-        let mut topics_touched: BTreeSet<String> = BTreeSet::new();
-        for op in ops {
-            match op {
-                IncrementalAlterOp::Set { topic, key, value } => {
-                    topics_touched.insert(topic.clone());
-                    if let Some(s) = store.get_mut(topic) {
-                        s.config_overrides.insert(key.clone(), value.clone());
-                    }
-                }
-                IncrementalAlterOp::Delete { topic, key } => {
-                    topics_touched.insert(topic.clone());
-                    if let Some(s) = store.get_mut(topic) {
-                        s.config_overrides.remove(key);
+        if !options.validate_only {
+            let mut store = self.topics.lock().unwrap();
+            for (resource, ops) in configs {
+                for op in ops {
+                    match op.op_type {
+                        AlterConfigOpType::Set => {
+                            if let Some(state) = store.get_mut(&resource.name) {
+                                state.config_overrides.insert(
+                                    op.name.clone(),
+                                    op.value.clone().ok_or_else(|| {
+                                        AdminError::InvalidArgument("SET needs a value".into())
+                                    })?,
+                                );
+                            }
+                        }
+                        AlterConfigOpType::Delete => {
+                            if let Some(state) = store.get_mut(&resource.name) {
+                                state.config_overrides.remove(&op.name);
+                            }
+                        }
+                        AlterConfigOpType::Append | AlterConfigOpType::Subtract => {
+                            return Err(AdminError::InvalidArgument(
+                                "test fake supports SET and DELETE only".into(),
+                            ));
+                        }
                     }
                 }
             }
         }
-        Ok(topics_touched
-            .into_iter()
-            .map(|topic| AlterConfigsOutcome { topic, error: None })
+        Ok(configs
+            .keys()
+            .map(|resource| (resource.clone(), Ok(())))
             .collect())
     }
 
@@ -1025,25 +1069,28 @@ impl AdminClientLike for FakeAdminClient {
     // on this — it uses a `renew_before_expiry_ms` of exactly 7d so the
     // decision always lands on Renew, and asserts that the post-renew
     // expiry only ever increases (or holds at `max`).
-    async fn create_delegation_token_as_owner(
+    async fn create_delegation_token(
         &mut self,
-        owner_principal_name: &str,
-        renewers: &[String],
-        max_lifetime: Option<Time>,
+        options: &CreateDelegationTokenOptions,
     ) -> Result<DelegationToken, AdminError> {
+        let owner = options.owner.clone().unwrap_or(KafkaPrincipal {
+            principal_type: "User".into(),
+            name: "operator".into(),
+        });
         self.recorded_calls
             .lock()
             .unwrap()
             .push(RecordedCall::CreateDelegationToken {
-                owner_principal_name: owner_principal_name.into(),
-                renewers: renewers.to_vec(),
-                max_lifetime,
+                owner_principal_name: owner.name.clone(),
+                renewers: options.renewers.iter().map(ToString::to_string).collect(),
+                max_lifetime: options.max_lifetime,
             });
         let now_ms = chrono::Utc::now().timestamp_millis();
         // The broker caps an absent or over-long lifetime at its 7-day
         // `delegation.token.max.lifetime.ms` default.
         let broker_ceiling = days(7);
-        let lifetime_ms = max_lifetime
+        let lifetime_ms = options
+            .max_lifetime
             .filter(|lifetime| *lifetime > Time::ZERO)
             .unwrap_or(broker_ceiling)
             .min(broker_ceiling)
@@ -1061,25 +1108,25 @@ impl AdminClientLike for FakeAdminClient {
         let mut hmac = vec![0u8; 32];
         hmac[24..].copy_from_slice(&id.to_le_bytes());
 
-        let owner: KafkaPrincipal = format!("User:{owner_principal_name}")
-            .parse()
-            .map_err(AdminError::Protocol)?;
-        let parsed_renewers: Vec<KafkaPrincipal> =
-            renewers.iter().filter_map(|s| s.parse().ok()).collect();
         let token = DelegationToken {
             token_id,
+            token_requester: owner.clone(),
             owner,
             hmac,
             issue_timestamp_ms: now_ms,
             expiry_timestamp_ms: now_ms + lifetime_ms,
             max_timestamp_ms: max_ts,
-            renewers: parsed_renewers,
+            renewers: options.renewers.clone(),
         };
         self.delegation_tokens.lock().unwrap().push(token.clone());
         Ok(token)
     }
 
-    async fn renew_delegation_token(&mut self, hmac: &[u8]) -> Result<DelegationToken, AdminError> {
+    async fn renew_delegation_token(
+        &mut self,
+        hmac: &[u8],
+        options: RenewDelegationTokenOptions,
+    ) -> Result<i64, AdminError> {
         self.recorded_calls
             .lock()
             .unwrap()
@@ -1093,15 +1140,24 @@ impl AdminClientLike for FakeAdminClient {
             .position(|t| t.hmac == hmac)
             .ok_or_else(|| AdminError::Protocol("renew: hmac not found".into()))?;
         let max = store[pos].max_timestamp_ms;
-        let new_expiry = (now_ms + 7 * 24 * 60 * 60 * 1_000).min(max);
+        let period = options
+            .renew_time_period
+            .filter(|period| *period > Time::ZERO)
+            .unwrap_or(days(7))
+            .min(days(7));
+        let new_expiry = (now_ms + period.millis_i64()).min(max);
         // Renew never moves expiry backwards.
         if new_expiry > store[pos].expiry_timestamp_ms {
             store[pos].expiry_timestamp_ms = new_expiry;
         }
-        Ok(store[pos].clone())
+        Ok(store[pos].expiry_timestamp_ms)
     }
 
-    async fn expire_delegation_token(&mut self, hmac: &[u8]) -> Result<(), AdminError> {
+    async fn expire_delegation_token(
+        &mut self,
+        hmac: &[u8],
+        options: ExpireDelegationTokenOptions,
+    ) -> Result<i64, AdminError> {
         self.recorded_calls
             .lock()
             .unwrap()
@@ -1109,23 +1165,49 @@ impl AdminClientLike for FakeAdminClient {
                 hmac: hmac.to_vec(),
             });
         let mut store = self.delegation_tokens.lock().unwrap();
-        store.retain(|t| t.hmac != hmac);
-        Ok(())
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        if let Some(period) = options
+            .expiry_time_period
+            .filter(|period| *period >= Time::ZERO)
+        {
+            let token = store
+                .iter_mut()
+                .find(|token| token.hmac == hmac)
+                .ok_or_else(|| AdminError::Protocol("expire: hmac not found".into()))?;
+            token.expiry_timestamp_ms = now_ms
+                .saturating_add(period.millis_i64())
+                .min(token.max_timestamp_ms);
+            Ok(token.expiry_timestamp_ms)
+        } else {
+            store.retain(|t| t.hmac != hmac);
+            Ok(now_ms)
+        }
     }
 
-    async fn describe_delegation_tokens_owned_by(
+    async fn describe_delegation_token(
         &mut self,
-        owner_principal: &str,
+        options: &DescribeDelegationTokenOptions,
     ) -> Result<Vec<DelegationToken>, AdminError> {
-        self.recorded_calls
-            .lock()
-            .unwrap()
-            .push(RecordedCall::DescribeDelegationTokensOwnedBy {
-                owner_principal: owner_principal.into(),
-            });
-        let want: KafkaPrincipal = owner_principal.parse().map_err(AdminError::Protocol)?;
+        if let Some(owners) = &options.owners {
+            for owner in owners {
+                self.recorded_calls.lock().unwrap().push(
+                    RecordedCall::DescribeDelegationTokensOwnedBy {
+                        owner_principal: owner.to_string(),
+                    },
+                );
+            }
+        }
         let store = self.delegation_tokens.lock().unwrap();
-        Ok(store.iter().filter(|t| t.owner == want).cloned().collect())
+        Ok(store
+            .iter()
+            .filter(|token| {
+                options
+                    .owners
+                    .as_ref()
+                    .is_none_or(|owners| owners.contains(&token.owner))
+            })
+            .cloned()
+            .collect())
     }
 }
 

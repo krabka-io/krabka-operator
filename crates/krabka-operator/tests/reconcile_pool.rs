@@ -566,6 +566,7 @@ async fn controller_scale_down_removes_highest_voter_before_pods() {
         shared::fake_admin::FakeAdminClient::new(),
     ));
     admin.lock().await.set_metadata_quorum(MetadataQuorum {
+        nodes: Vec::default(),
         leader_id: 0,
         leader_epoch: 1,
         high_watermark: 1,
@@ -1354,6 +1355,7 @@ async fn pool_status_ready_when_sts_ready() {
         .controller_dependency_requeue = krabka_units::millis(1_234);
     let admin = shared::fake_admin::FakeAdminClient::new();
     admin.set_metadata_quorum(MetadataQuorum {
+        nodes: Vec::default(),
         leader_id: 0,
         leader_epoch: 1,
         high_watermark: 1,
@@ -1436,6 +1438,7 @@ async fn deleting_pool_removes_exact_committed_voter() {
         shared::fake_admin::FakeAdminClient::new(),
     ));
     admin.lock().await.set_metadata_quorum(MetadataQuorum {
+        nodes: Vec::default(),
         leader_id: 1,
         leader_epoch: 3,
         high_watermark: 7,
@@ -1648,8 +1651,8 @@ async fn deleting_broker_pool_scales_to_zero_only_after_drain_and_unregister() {
     assert!(body["spec"]["replicas"] == 0);
     assert!(observed.iter().all(|request| {
         !(request.method() == Method::PATCH
-            && request.uri().path().ends_with("/kafkanodepools/brokers"))
-            && !(request.method() == Method::DELETE
+            && request.uri().path().ends_with("/kafkanodepools/brokers")
+            || request.method() == Method::DELETE
                 && request.uri().to_string().contains("persistentvolumeclaims"))
     }));
     assert!(state.remaining_rules() == 0);
@@ -1706,6 +1709,7 @@ async fn deleting_pool_finishes_observed_downscale_voters_before_pods() {
         shared::fake_admin::FakeAdminClient::new(),
     ));
     admin.lock().await.set_metadata_quorum(MetadataQuorum {
+        nodes: Vec::default(),
         leader_id: 0,
         leader_epoch: 3,
         high_watermark: 7,
@@ -1793,6 +1797,7 @@ async fn deleting_last_voter_keeps_finalizer_and_reports_blocked() {
     let ctx = fixture_ctx(mock_client(&state, ns), ns);
     let admin = shared::fake_admin::FakeAdminClient::new();
     admin.set_metadata_quorum(MetadataQuorum {
+        nodes: Vec::default(),
         leader_id: 0,
         leader_epoch: 3,
         high_watermark: 7,
