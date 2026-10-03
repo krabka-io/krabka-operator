@@ -630,6 +630,12 @@ fn render_webhooks_toml(
             if let Some(secret) = resolved.get(&w.name) {
                 e.insert("secret".into(), json!(secret));
             }
+            if let Some(v) = &w.signature_mode {
+                e.insert("signature_mode".into(), json!(v));
+            }
+            if let Some(v) = &w.forward_headers {
+                e.insert("forward_headers".into(), json!(v));
+            }
             if let Some(v) = &w.signature_header {
                 e.insert("signature_header".into(), json!(v));
             }
@@ -1278,8 +1284,49 @@ fn validate_config(spec: &crate::crd::grpc_gateway::KafkaGrpcGatewaySpec) -> Res
         {
             return Err("spec.webhooks.signatureEncoding must be hex or base64".into());
         }
-        if webhook.secret_ref.is_some() != webhook.signature_header.is_some() {
+        if let Some(mode) = webhook.signature_mode.as_deref() {
+            if mode != "standard_webhooks" {
+                return Err("spec.webhooks.signatureMode must be standard_webhooks".into());
+            }
+            if webhook.secret_ref.is_none() {
+                return Err("spec.webhooks.secretRef is required for Standard Webhooks".into());
+            }
+            for (field, present) in [
+                ("signatureHeader", webhook.signature_header.is_some()),
+                ("signatureEncoding", webhook.signature_encoding.is_some()),
+                ("signaturePrefix", webhook.signature_prefix.is_some()),
+                ("timestampHeader", webhook.timestamp_header.is_some()),
+            ] {
+                if present {
+                    return Err(format!(
+                        "spec.webhooks.{field} must be absent for Standard Webhooks"
+                    ));
+                }
+            }
+            if webhook
+                .idempotency_source
+                .as_deref()
+                .is_some_and(|source| source != "header:webhook-id")
+            {
+                return Err(
+                    "spec.webhooks.idempotencySource must be header:webhook-id for Standard Webhooks"
+                        .into(),
+                );
+            }
+        } else if webhook.secret_ref.is_some() != webhook.signature_header.is_some() {
             return Err("spec.webhooks.secretRef and signatureHeader must be set together".into());
+        }
+        for name in webhook.forward_headers.iter().flatten() {
+            let header = axum::http::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|error| format!("spec.webhooks.forwardHeaders: {error}"))?;
+            if matches!(
+                header.as_str(),
+                "authorization" | "cookie" | "x-gitlab-token" | "webhook-signature"
+            ) {
+                return Err(format!(
+                    "spec.webhooks.forwardHeaders must not contain {name}"
+                ));
+            }
         }
         if let Some(value) = webhook.idempotency_source.as_deref() {
             validate_webhook_source(value, "spec.webhooks.idempotencySource")?;
@@ -2085,6 +2132,80 @@ mod tests {
         }
     }
 
+    fn standard_webhooks_spec() -> KafkaGrpcGatewaySpec {
+        serde_json::from_value(json!({"webhooks": [{
+            "name": "events", "targetTopic": "events", "signatureMode": "standard_webhooks",
+            "forwardHeaders": ["webhook-id", "X-Event-Type"],
+            "timestampTolerance": "60s", "maxBody": "25MB",
+            "keySource": "json:$.id", "schemaSubject": "events-value", "schemaFormat": "json",
+            "secretRef": {"name": "webhook-signing-token", "key": "token"}
+        }]}))
+        .unwrap()
+    }
+
+    #[test]
+    fn standard_webhooks_requires_secret_and_rejects_overrides() {
+        let mut spec = standard_webhooks_spec();
+        for source in [None, Some("header:webhook-id".into())] {
+            spec.webhooks[0].idempotency_source = source;
+            assert!(validate_config(&spec).is_ok());
+        }
+        for (field, value) in [
+            ("signatureMode", json!("unknown")),
+            ("secretRef", json!(null)),
+            ("signatureHeader", json!("webhook-signature")),
+            ("signatureEncoding", json!("base64")),
+            ("signaturePrefix", json!("v1,")),
+            ("timestampHeader", json!("webhook-timestamp")),
+            ("idempotencySource", json!("body_hash")),
+            ("forwardHeaders", json!(["bad header"])),
+            ("forwardHeaders", json!(["Authorization"])),
+            ("forwardHeaders", json!(["cookie"])),
+            ("forwardHeaders", json!(["X-Gitlab-Token"])),
+            ("forwardHeaders", json!(["webhook-signature"])),
+        ] {
+            let mut invalid = serde_json::to_value(&spec).unwrap();
+            invalid["webhooks"][0][field] = value;
+            let invalid = serde_json::from_value(invalid).unwrap();
+            assert!(
+                validate_config(&invalid).is_err(),
+                "accepted invalid Standard Webhooks field {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn config_secret_renders_standard_webhooks_and_forward_headers() {
+        let mut gw = gateway_fixture("gw", "demo");
+        gw.spec = standard_webhooks_spec();
+        let token = "whsec_c2lnbmluZy10b2tlbg==";
+        let secret = config_secret(
+            &gw,
+            &BTreeMap::from([("events".into(), token.into())]),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let data = secret.data.unwrap();
+        let rendered: toml::Value =
+            toml::from_str(std::str::from_utf8(&data["webhooks.toml"].0).unwrap()).unwrap();
+        let expected: toml::Value = toml::from_str(
+            r#"[[endpoints]]
+name = "events"
+target_topic = "events"
+signature_mode = "standard_webhooks"
+forward_headers = ["webhook-id", "X-Event-Type"]
+secret = "whsec_c2lnbmluZy10b2tlbg=="
+timestamp_tolerance = "1m"
+max_body = "25000000B"
+key_source = "json:$.id"
+schema_subject = "events-value"
+schema_format = "json"
+"#,
+        )
+        .unwrap();
+        assert!(rendered == expected);
+    }
+
     #[test]
     fn config_secret_renders_webhooks_and_outbound_toml() {
         let mut gw = gateway_fixture("gw", "demo");
@@ -2092,6 +2213,8 @@ mod tests {
             name: "orders".into(),
             target_topic: "raw-orders".into(),
             principal: Some("User:webhook".into()),
+            signature_mode: None,
+            forward_headers: None,
             signature_header: Some("X-Hub-Signature-256".into()),
             signature_encoding: None,
             signature_prefix: Some("sha256=".into()),
@@ -2443,6 +2566,8 @@ mod tests {
             name: "orders".into(),
             target_topic: "orders".into(),
             principal: None,
+            signature_mode: None,
+            forward_headers: None,
             signature_header: None,
             signature_encoding: None,
             signature_prefix: None,
