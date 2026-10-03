@@ -956,53 +956,92 @@ async fn broker_scale_down_surfaces_retrying_drain_message() {
 }
 
 #[tokio::test]
-async fn broker_scale_down_blocks_when_a_removed_broker_still_has_data() {
-    let mut rules = broker_downscale_rules(2, &[2, 3]);
-    rules.push(MockRule {
-        method: Method::PATCH,
-        path_substr: "/kafkanodepools/brokers/status".into(),
-        response: json_response(200, &fake_pool_body("brokers", "y", "demo")),
-    });
-    let (ctx, state) = build_ctx("y", rules);
-    let admin = Arc::new(tokio::sync::Mutex::new(
-        shared::fake_admin::FakeAdminClient::new(),
-    ));
-    admin
-        .lock()
-        .await
-        .set_partition_assignments(vec![PartitionAssignment {
-            topic: "orders".into(),
-            partition: 0,
-            replicas: vec![0, 1, 2],
-            adding_replicas: Vec::new(),
-            removing_replicas: Vec::new(),
-        }]);
-    ctx.insert_admin_client_for_test("demo", admin.clone())
-        .await;
-    let mut pool = pool_cr("brokers", "y", Some("demo"), 2);
-    pool.spec.roles = vec![NodeRole::Broker];
+async fn broker_scale_down_refreshes_completed_drain_without_removing_remaining_data() {
+    for (topic, pending_command) in [
+        ("orders", None),
+        ("__krabka_rebalancer_state", None),
+        ("__krabka_rebalancer_state", Some("refresh")),
+        ("__krabka_rebalancer_state", Some("stop")),
+    ] {
+        let mut drain = ready_broker_drain(2, &[2, 3]);
+        if let Some(command) = pending_command {
+            drain["metadata"]["annotations"] = serde_json::json!({
+                "krabka.io/rebalance": command
+            });
+        }
+        let mut rules = broker_downscale_rules(2, &[2, 3]);
+        rules.last_mut().unwrap().response = json_response(200, &drain);
+        if pending_command.is_none() {
+            rules.push(MockRule {
+                method: Method::PATCH,
+                path_substr: "/kafkarebalances/demo-brokers-drain-to-2".into(),
+                response: json_response(200, &drain),
+            });
+        }
+        rules.push(MockRule {
+            method: Method::PATCH,
+            path_substr: "/kafkanodepools/brokers/status".into(),
+            response: json_response(200, &fake_pool_body("brokers", "y", "demo")),
+        });
+        let (ctx, state) = build_ctx("y", rules);
+        let admin = Arc::new(tokio::sync::Mutex::new(
+            shared::fake_admin::FakeAdminClient::new(),
+        ));
+        admin
+            .lock()
+            .await
+            .set_partition_assignments(vec![PartitionAssignment {
+                topic: topic.into(),
+                partition: 0,
+                replicas: vec![0, 1, 2],
+                adding_replicas: Vec::new(),
+                removing_replicas: Vec::new(),
+            }]);
+        ctx.insert_admin_client_for_test("demo", admin.clone())
+            .await;
+        let mut pool = pool_cr("brokers", "y", Some("demo"), 2);
+        pool.spec.roles = vec![NodeRole::Broker];
 
-    reconcile(Arc::new(pool), ctx).await.unwrap();
+        reconcile(Arc::new(pool), ctx).await.unwrap();
 
-    assert!(matches!(
-        admin.lock().await.calls().as_slice(),
-        [shared::fake_admin::RecordedCall::DescribePartitionAssignments(topics)] if topics.is_empty()
-    ));
-    let observed = state.take_observed();
-    assert!(observed.iter().all(|request| {
-        !(request.method() == Method::PATCH && request.uri().to_string().contains("/statefulsets/"))
-    }));
-    let status = observed
-        .iter()
-        .find(|request| request.uri().to_string().contains("/status"))
-        .expect("blocked status");
-    let body: serde_json::Value = serde_json::from_slice(status.body()).unwrap();
-    assert!(body["status"]["conditions"][0]["reason"] == "BrokerDrainBlocked");
-    assert!(
-        body["status"]["conditions"][0]["message"]
-            == "orders-0 still has a replica on removed brokers"
-    );
-    assert!(state.remaining_rules() == 0);
+        assert!(matches!(
+            admin.lock().await.calls().as_slice(),
+            [shared::fake_admin::RecordedCall::DescribePartitionAssignments(topics)] if topics.is_empty()
+        ));
+        let observed = state.take_observed();
+        assert!(observed.iter().all(|request| {
+            !(request.method() == Method::PATCH
+                && request.uri().to_string().contains("/statefulsets/"))
+        }));
+        let refresh = observed.iter().find(|request| {
+            request.method() == Method::PATCH
+                && request
+                    .uri()
+                    .path()
+                    .ends_with("/kafkarebalances/demo-brokers-drain-to-2")
+        });
+        if pending_command.is_none() {
+            let body: serde_json::Value =
+                serde_json::from_slice(refresh.expect("refresh completed drain").body()).unwrap();
+            assert!(body["metadata"]["annotations"]["krabka.io/rebalance"] == "refresh");
+        } else {
+            assert!(refresh.is_none(), "preserve the pending command");
+        }
+        let status = observed
+            .iter()
+            .find(|request| request.uri().to_string().contains("/status"))
+            .expect("drain status patch");
+        let body: serde_json::Value = serde_json::from_slice(status.body()).unwrap();
+        assert!(body["status"]["conditions"][0]["reason"] == "BrokerDrainInProgress");
+        assert!(body["status"]["conditions"][0]["status"] == "False");
+        assert!(
+            body["status"]["conditions"][0]["message"]
+                == format!(
+                    "refreshing completed remove-brokers proposal: {topic}-0 still has a replica on removed brokers"
+                )
+        );
+        assert!(state.remaining_rules() == 0);
+    }
 }
 
 #[tokio::test]
@@ -1515,6 +1554,11 @@ async fn deleting_broker_pool_with_data_keeps_pods_pvcs_and_finalizer() {
         },
         MockRule {
             method: Method::PATCH,
+            path_substr: "/kafkarebalances/demo-brokers-drain-to-0".into(),
+            response: json_response(200, &ready_broker_drain(0, &[0, 1])),
+        },
+        MockRule {
+            method: Method::PATCH,
             path_substr: format!("/kafkanodepools/{pool_name}/status"),
             response: json_response(200, &fake_pool_body(pool_name, namespace, parent)),
         },
@@ -1567,7 +1611,20 @@ async fn deleting_broker_pool_with_data_keeps_pods_pvcs_and_finalizer() {
         .find(|request| request.uri().to_string().contains("/status"))
         .expect("blocked deletion status");
     let body: serde_json::Value = serde_json::from_slice(status.body()).unwrap();
-    assert!(body["status"]["conditions"][0]["reason"] == "BrokerDrainBlocked");
+    assert!(body["status"]["conditions"][0]["reason"] == "BrokerDrainInProgress");
+    assert!(body["status"]["conditions"][0]["status"] == "False");
+    let refresh = observed
+        .iter()
+        .find(|request| {
+            request.method() == Method::PATCH
+                && request
+                    .uri()
+                    .path()
+                    .ends_with("/kafkarebalances/demo-brokers-drain-to-0")
+        })
+        .expect("refresh completed drain before deleting data");
+    let body: serde_json::Value = serde_json::from_slice(refresh.body()).unwrap();
+    assert!(body["metadata"]["annotations"]["krabka.io/rebalance"] == "refresh");
     assert!(state.remaining_rules() == 0);
 }
 
