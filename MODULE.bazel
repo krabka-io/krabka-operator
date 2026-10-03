@@ -7,7 +7,7 @@ so there is no second dependency set to keep in sync.
 
 module(
     name = "krabka_operator",
-    version = "0.4.1",
+    version = "0.5.0",
 )
 
 # 0.0.110 or later. Earlier releases fetch the zlib1g package of their rustc
