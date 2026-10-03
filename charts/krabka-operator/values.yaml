@@ -7,8 +7,8 @@ image:
 # Default broker image used when a Kafka CR doesn't override it.
 brokerImage:
   repository: ghcr.io/krabka-io/krabka-broker
-  tag: "" # defaults to .Chart.AppVersion when empty
-  digest: "sha256:15851611a7d5df6e20d3f9bd85b3821ca2dd52d5ca6f4042f5a4cfe0a3a1ab89" # v0.5.4; wins over tag
+  tag: "v0.7.0"
+  digest: "sha256:54ae711e5a7c8bdb03414402722f5c41dd50980ab315ab84d0803cca775fb463" # v0.7.0; wins over tag
   pullPolicy: IfNotPresent
 
 # Digest-pinned shell copied into distroless broker pods. Override with an
