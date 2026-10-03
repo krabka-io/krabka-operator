@@ -7318,8 +7318,8 @@ source = "git+https://github.com/krabka-io/krabka-o11y?rev=ae6c7a2e8bf74ca1ad19b
 
 [[patch.unused]]
 name = "krabka-rebalancer"
-version = "0.4.1"
-source = "git+https://github.com/krabka-io/krabka-rebalancer?rev=7d427ad8e5e8be60c7bc6c8f37c59b3d40045da5#7d427ad8e5e8be60c7bc6c8f37c59b3d40045da5"
+version = "0.4.2"
+source = "git+https://github.com/krabka-io/krabka-rebalancer?rev=04c68234fb1bb21578b17380bd03d7fc3d94be91#04c68234fb1bb21578b17380bd03d7fc3d94be91"
 
 [[patch.unused]]
 name = "krabka-replicator"
