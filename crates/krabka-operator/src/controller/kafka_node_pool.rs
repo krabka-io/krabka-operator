@@ -2499,6 +2499,27 @@ fn broker_drain_waiting_message(rebalance: &KafkaRebalance, brokers: &[i32]) -> 
     }
 }
 
+async fn refresh_broker_drain(
+    api: &Api<KafkaRebalance>,
+    name: &str,
+    rebalance: &KafkaRebalance,
+) -> Result<(), ReconcileError> {
+    if !rebalance
+        .annotations()
+        .contains_key(REBALANCE_COMMAND_ANNOTATION)
+    {
+        api.patch(
+            name,
+            &PatchParams::default(),
+            &Patch::Merge(&json!({
+                "metadata": { "annotations": { (REBALANCE_COMMAND_ANNOTATION): "refresh" } }
+            })),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 struct BrokerDrainInput<'a> {
     pool: &'a KafkaNodePool,
     pool_api: &'a Api<KafkaNodePool>,
@@ -2660,12 +2681,15 @@ async fn reconcile_broker_drain(
         .find(|assignment| assignment.replicas.iter().any(|id| removed.contains(id)))
     {
         drop(admin);
+        // A topic can appear after the completed proposal's snapshot. Keep
+        // the broker running and request a new plan for all current replicas.
+        refresh_broker_drain(&api, &rebalance_name, &rebalance).await?;
         return patch_broker_drain_condition(
             input.pool_api,
             input.name,
-            "BrokerDrainBlocked",
+            "BrokerDrainInProgress",
             format!(
-                "{}-{} still has a replica on removed brokers",
+                "refreshing completed remove-brokers proposal: {}-{} still has a replica on removed brokers",
                 assignment.topic, assignment.partition
             ),
         )
