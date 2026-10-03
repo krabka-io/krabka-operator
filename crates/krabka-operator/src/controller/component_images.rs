@@ -22,13 +22,13 @@
 //! component release.
 
 /// Worker image of a `KafkaConnector`, from krabka-io/krabka-connect.
-pub const CONNECT_WORKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-connect-worker:v0.4.0";
+pub const CONNECT_WORKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-connect-worker:v0.4.1";
 
 /// Image of a `KafkaGrpcGateway`, from krabka-io/krabka-gateway.
-pub const GATEWAY_IMAGE: &str = "ghcr.io/krabka-io/krabka-gateway:v0.4.0";
+pub const GATEWAY_IMAGE: &str = "ghcr.io/krabka-io/krabka-gateway:v0.5.0";
 
 /// Image of a `SchemaRegistry`, from krabka-io/krabka-schema-registry.
-pub const SCHEMA_REGISTRY_IMAGE: &str = "ghcr.io/krabka-io/krabka-schema-registry:0.4.0";
+pub const SCHEMA_REGISTRY_IMAGE: &str = "ghcr.io/krabka-io/krabka-schema-registry:0.4.1";
 
 #[cfg(test)]
 mod tests {
@@ -44,12 +44,12 @@ mod tests {
         for (actual, expected) in [
             (
                 CONNECT_WORKER_IMAGE,
-                "ghcr.io/krabka-io/krabka-connect-worker:v0.4.0",
+                "ghcr.io/krabka-io/krabka-connect-worker:v0.4.1",
             ),
-            (GATEWAY_IMAGE, "ghcr.io/krabka-io/krabka-gateway:v0.4.0"),
+            (GATEWAY_IMAGE, "ghcr.io/krabka-io/krabka-gateway:v0.5.0"),
             (
                 SCHEMA_REGISTRY_IMAGE,
-                "ghcr.io/krabka-io/krabka-schema-registry:0.4.0",
+                "ghcr.io/krabka-io/krabka-schema-registry:0.4.1",
             ),
         ] {
             assert!(actual == expected);
