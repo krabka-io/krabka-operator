@@ -1284,50 +1284,7 @@ fn validate_config(spec: &crate::crd::grpc_gateway::KafkaGrpcGatewaySpec) -> Res
         {
             return Err("spec.webhooks.signatureEncoding must be hex or base64".into());
         }
-        if let Some(mode) = webhook.signature_mode.as_deref() {
-            if mode != "standard_webhooks" {
-                return Err("spec.webhooks.signatureMode must be standard_webhooks".into());
-            }
-            if webhook.secret_ref.is_none() {
-                return Err("spec.webhooks.secretRef is required for Standard Webhooks".into());
-            }
-            for (field, present) in [
-                ("signatureHeader", webhook.signature_header.is_some()),
-                ("signatureEncoding", webhook.signature_encoding.is_some()),
-                ("signaturePrefix", webhook.signature_prefix.is_some()),
-                ("timestampHeader", webhook.timestamp_header.is_some()),
-            ] {
-                if present {
-                    return Err(format!(
-                        "spec.webhooks.{field} must be absent for Standard Webhooks"
-                    ));
-                }
-            }
-            if webhook
-                .idempotency_source
-                .as_deref()
-                .is_some_and(|source| source != "header:webhook-id")
-            {
-                return Err(
-                    "spec.webhooks.idempotencySource must be header:webhook-id for Standard Webhooks"
-                        .into(),
-                );
-            }
-        } else if webhook.secret_ref.is_some() != webhook.signature_header.is_some() {
-            return Err("spec.webhooks.secretRef and signatureHeader must be set together".into());
-        }
-        for name in webhook.forward_headers.iter().flatten() {
-            let header = axum::http::HeaderName::from_bytes(name.as_bytes())
-                .map_err(|error| format!("spec.webhooks.forwardHeaders: {error}"))?;
-            if matches!(
-                header.as_str(),
-                "authorization" | "cookie" | "x-gitlab-token" | "webhook-signature"
-            ) {
-                return Err(format!(
-                    "spec.webhooks.forwardHeaders must not contain {name}"
-                ));
-            }
-        }
+        validate_webhook_auth(webhook)?;
         if let Some(value) = webhook.idempotency_source.as_deref() {
             validate_webhook_source(value, "spec.webhooks.idempotencySource")?;
         }
@@ -1441,6 +1398,60 @@ fn validate_webhook_source(value: &str, path: &str) -> Result<(), String> {
     jsonpath_rust::parser::parse_json_path(json_path)
         .map(|_| ())
         .map_err(|error| format!("{path}: invalid JSONPath {json_path:?}: {error}"))
+}
+
+fn validate_webhook_auth(
+    webhook: &crate::crd::grpc_gateway::InboundWebhookSpec,
+) -> Result<(), String> {
+    if let Some(mode) = webhook.signature_mode.as_deref() {
+        if mode != "standard_webhooks" {
+            return Err("spec.webhooks.signatureMode must be standard_webhooks".into());
+        }
+        if webhook.secret_ref.is_none() {
+            return Err("spec.webhooks.secretRef is required for Standard Webhooks".into());
+        }
+        for (field, present) in [
+            ("signatureHeader", webhook.signature_header.is_some()),
+            ("signatureEncoding", webhook.signature_encoding.is_some()),
+            ("signaturePrefix", webhook.signature_prefix.is_some()),
+            ("timestampHeader", webhook.timestamp_header.is_some()),
+        ] {
+            if present {
+                return Err(format!(
+                    "spec.webhooks.{field} must be absent for Standard Webhooks"
+                ));
+            }
+        }
+        if webhook
+            .idempotency_source
+            .as_deref()
+            .is_some_and(|source| source != "header:webhook-id")
+        {
+            return Err(
+                "spec.webhooks.idempotencySource must be header:webhook-id for Standard Webhooks"
+                    .into(),
+            );
+        }
+    } else if webhook.secret_ref.is_some() != webhook.signature_header.is_some() {
+        return Err("spec.webhooks.secretRef and signatureHeader must be set together".into());
+    }
+    for name in webhook.forward_headers.iter().flatten() {
+        let header = axum::http::HeaderName::from_bytes(name.as_bytes())
+            .map_err(|error| format!("spec.webhooks.forwardHeaders: {error}"))?;
+        if matches!(
+            header.as_str(),
+            "authorization" | "cookie" | "x-gitlab-token" | "webhook-signature"
+        ) || webhook
+            .signature_header
+            .as_deref()
+            .is_some_and(|signature| signature.eq_ignore_ascii_case(header.as_str()))
+        {
+            return Err(format!(
+                "spec.webhooks.forwardHeaders must not contain {name}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_outbound_config(
@@ -2170,6 +2181,28 @@ mod tests {
             assert!(
                 validate_config(&invalid).is_err(),
                 "accepted invalid Standard Webhooks field {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_hmac_rejects_forwarding_its_configured_signature_header() {
+        for (header, allowed) in [
+            ("x-custom-signature", false),
+            ("X-Custom-Signature", false),
+            ("X-CUSTOM-SIGNATURE", false),
+            ("X-Event-Type", true),
+        ] {
+            let spec = serde_json::from_value(json!({"webhooks": [{
+                "name": "events", "targetTopic": "events",
+                "signatureHeader": "X-CuStOm-SiGnAtUrE",
+                "secretRef": {"name": "webhook-secret", "key": "token"},
+                "forwardHeaders": [header]
+            }]}))
+            .unwrap();
+            assert!(
+                validate_config(&spec).is_ok() == allowed,
+                "forward header {header} should have allowed={allowed}"
             );
         }
     }
