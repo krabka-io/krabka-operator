@@ -345,6 +345,16 @@ pub struct InboundWebhookSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub principal: Option<String>,
 
+    /// Signature protocol. Set `standard_webhooks` to verify the signed
+    /// message ID, timestamp, and body; omit for body-only HMAC verification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_mode: Option<String>,
+
+    /// Request headers to preserve as Kafka record headers. Authentication
+    /// credentials and webhook signatures cannot be forwarded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_headers: Option<Vec<String>>,
+
     /// HTTP header that carries the HMAC signature, for example
     /// `X-Hub-Signature-256`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -401,7 +411,8 @@ pub struct InboundWebhookSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_format: Option<String>,
 
-    /// Kubernetes Secret key reference for the HMAC signing secret. The
+    /// Kubernetes Secret key reference for the HMAC signing secret or the
+    /// Standard Webhooks signing token required by `signatureMode`. The
     /// controller resolves it at render time and puts the raw secret value
     /// into the config Secret. The CRD never stores that value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -711,6 +722,8 @@ mod tests {
                     name: "orders".into(),
                     target_topic: "raw-orders".into(),
                     principal: Some("User:webhook-producer".into()),
+                    signature_mode: None,
+                    forward_headers: None,
                     signature_header: Some("X-Hub-Signature-256".into()),
                     signature_encoding: Some("hex".into()),
                     signature_prefix: Some("sha256=".into()),
@@ -804,6 +817,18 @@ mod tests {
         let j = serde_json::to_string(&status).unwrap();
         assert!(!j.contains("observedGeneration"), "got: {j}");
         assert!(!j.contains("readyReplicas"), "got: {j}");
+    }
+
+    #[test]
+    fn standard_webhooks_round_trips_through_json() {
+        let value = serde_json::json!({
+            "name": "events", "targetTopic": "events", "signatureMode": "standard_webhooks",
+            "forwardHeaders": ["webhook-id", "X-Event-Type"],
+            "timestampTolerance": "1m", "maxBody": "25000000B",
+            "secretRef": {"name": "webhook-signing-token", "key": "token"}
+        });
+        let webhook: InboundWebhookSpec = serde_json::from_value(value.clone()).unwrap();
+        assert!(serde_json::to_value(webhook).unwrap() == value);
     }
 
     #[test]

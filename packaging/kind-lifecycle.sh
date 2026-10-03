@@ -31,6 +31,7 @@ helm package "${rebalancer_chart}" --destination "${evidence}" \
 
 capture() {
     local exit_code=$?
+    local namespace pod container
     set +e
     if kubectl cluster-info >/dev/null 2>&1; then
         kubectl get kafka m20 -o json >"${evidence}/kafka.json"
@@ -40,6 +41,21 @@ capture() {
         kubectl get statefulsets -o json >"${evidence}/statefulsets.json"
         kubectl get persistentvolumeclaims -o json >"${evidence}/pvcs.json"
         kubectl get pods -A -o wide >"${evidence}/pods.txt"
+        kubectl get pods -A -o json >"${evidence}/pods.json"
+        mkdir -p "${evidence}/broker-logs"
+        while IFS=$'\t' read -r namespace pod container; do
+            kubectl logs -n "${namespace}" "${pod}" -c "${container}" \
+                >"${evidence}/broker-logs/${namespace}_${pod}_${container}.log" 2>&1
+            kubectl logs -n "${namespace}" "${pod}" -c "${container}" --previous \
+                >"${evidence}/broker-logs/${namespace}_${pod}_${container}-previous.log" 2>&1
+        done < <(jq -r '
+            .items[]
+            | select(.metadata.labels["app.kubernetes.io/instance"] == "m20"
+                and .metadata.labels["app.kubernetes.io/name"] == "krabka-broker")
+            | .metadata as $pod
+            | (.spec.containers + (.spec.initContainers // []))[]
+            | [$pod.namespace, $pod.name, .name] | @tsv
+        ' "${evidence}/pods.json")
         kubectl get events -A --sort-by=.lastTimestamp >"${evidence}/events.txt"
         kubectl get lease -n krabka-system krabka-operator-leader -o json >"${evidence}/operator-lease.json"
         kubectl logs -n krabka-system -l app.kubernetes.io/name=krabka-operator \
@@ -238,12 +254,16 @@ finish_traffic() {
 
 wait_rollout() {
     local pool=$1 minimum_ready=$2 expected_image=$3 old_revision=${4:-} deadline=$((SECONDS + 900))
+    local expected_metadata=${5:-}
     while ((SECONDS < deadline)); do
-        read -r desired ready updated current_revision update_revision image < <(
+        read -r desired ready updated current_revision update_revision image generation observed_generation metadata_version < <(
             kubectl get "statefulset/m20-${pool}" -o json | jq -r '[
                 .spec.replicas, (.status.readyReplicas // 0), (.status.updatedReplicas // 0),
                 (.status.currentRevision // "missing"), (.status.updateRevision // "missing"),
-                .spec.template.spec.containers[0].image
+                .spec.template.spec.containers[0].image,
+                .metadata.generation, (.status.observedGeneration // 0),
+                ([.spec.template.spec.initContainers[]?.env[]?
+                    | select(.name == "KRABKA_METADATA_VERSION") | .value][0] // "missing")
             ] | @tsv'
         )
         printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "${pool}" \
@@ -251,6 +271,8 @@ wait_rollout() {
             >>"${evidence}/rollout-ledger.tsv"
         ((ready >= minimum_ready))
         if [[ "${image}" == "${expected_image}" \
+                && "${observed_generation}" == "${generation}" \
+                && ( -z "${expected_metadata}" || "${metadata_version}" == "${expected_metadata}" ) \
                 && ( -z "${old_revision}" || "${update_revision}" != "${old_revision}" ) ]]; then
             if [[ "${ready}" == "${desired}" && "${updated}" == "${desired}" \
                 && "${current_revision}" == "${update_revision}" ]]; then
@@ -282,6 +304,9 @@ finish_traffic
 kubectl wait kafka/m20 --for=jsonpath='{.status.conditions[?(@.type=="KafkaVersionUpgrade")].reason}'=Finalized --timeout=10m
 [[ "$(kubectl get kafka m20 -o jsonpath='{.status.metadataVersion}')" == "4.0" ]]
 kubectl get kafka m20 -o json >"${evidence}/metadata-after-finalization.json"
+# Finalization updates the formatter's metadata version and can trigger a
+# second roll. Wait for its observed template before disrupting another pod.
+wait_rollout brokers 3 "${broker_image}" "" "4.0"
 
 start_traffic disruption 450
 old_uid="$(kubectl get pod m20-brokers-0 -o jsonpath='{.metadata.uid}')"
