@@ -156,8 +156,8 @@ krabka-remote-storage = { git = "https://github.com/krabka-io/krabka-broker", re
 krabka-remote-storage-topic = { git = "https://github.com/krabka-io/krabka-broker", rev = "a23b3c0f930d034d8c9d791eed953537e3028279" }
 krabka-replicator = { git = "https://github.com/krabka-io/krabka-connect", rev = "ecd5fd77656bc24addb087e714477b9201053a28" }
 krabka-restore = { git = "https://github.com/krabka-io/krabka-broker", rev = "a23b3c0f930d034d8c9d791eed953537e3028279" }
-krabka-schema-registry = { git = "https://github.com/krabka-io/krabka-schema-registry", rev = "0ecb43620a40717e5cba2a248744905c5fadf869" }
-krabka-schema-serde = { git = "https://github.com/krabka-io/krabka-schema-registry", rev = "0ecb43620a40717e5cba2a248744905c5fadf869" }
+krabka-schema-registry = { git = "https://github.com/krabka-io/krabka-schema-registry", rev = "ce5f1bdd913a1f8056b940d0ceaa51155b6ca52b" }
+krabka-schema-serde = { git = "https://github.com/krabka-io/krabka-schema-registry", rev = "ce5f1bdd913a1f8056b940d0ceaa51155b6ca52b" }
 krabka-sdk-conformance = { git = "https://github.com/krabka-io/krabka-gateway", rev = "49870fd8e5f708274ff69a3e64a092844e2f8809" }
 krabka-security = { git = "https://github.com/krabka-io/krabka-protocol", rev = "9b973b98ffc28ddb9e5537ed53ad824328f2304b" }
 krabka-telemetry = { git = "https://github.com/krabka-io/krabka-broker", rev = "a23b3c0f930d034d8c9d791eed953537e3028279" }

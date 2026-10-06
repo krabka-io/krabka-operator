@@ -3046,7 +3046,7 @@ dependencies = [
 [[package]]
 name = "krabka-schema-serde"
 version = "0.4.1"
-source = "git+https://github.com/krabka-io/krabka-schema-registry?rev=0ecb43620a40717e5cba2a248744905c5fadf869#0ecb43620a40717e5cba2a248744905c5fadf869"
+source = "git+https://github.com/krabka-io/krabka-schema-registry?rev=ce5f1bdd913a1f8056b940d0ceaa51155b6ca52b#ce5f1bdd913a1f8056b940d0ceaa51155b6ca52b"
 dependencies = [
  "apache-avro",
  "assert2",
@@ -7387,7 +7387,7 @@ source = "git+https://github.com/krabka-io/krabka-broker?rev=a23b3c0f930d034d8c9
 [[patch.unused]]
 name = "krabka-schema-registry"
 version = "0.4.1"
-source = "git+https://github.com/krabka-io/krabka-schema-registry?rev=0ecb43620a40717e5cba2a248744905c5fadf869#0ecb43620a40717e5cba2a248744905c5fadf869"
+source = "git+https://github.com/krabka-io/krabka-schema-registry?rev=ce5f1bdd913a1f8056b940d0ceaa51155b6ca52b#ce5f1bdd913a1f8056b940d0ceaa51155b6ca52b"
 
 [[patch.unused]]
 name = "krabka-sdk-conformance"
