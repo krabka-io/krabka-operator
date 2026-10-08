@@ -7,8 +7,8 @@ image:
 # Default broker image used when a Kafka CR doesn't override it.
 brokerImage:
   repository: ghcr.io/krabka-io/krabka-broker
-  tag: "8cbc01f3859b5ab24670c304ce6589c79c227cc9"
-  digest: "sha256:117df778e3e8af143d8bc3681233c0151dc97d51cfafd3844c4daa09afaf9690" # krabka-broker main at 8cbc01f3 (1.0.0); wins over tag
+  tag: "v1.0.0"
+  digest: "sha256:6af866babcbf39046ca24f156a6baca868b0b5c41de31746263b161e5484a084" # v1.0.0; wins over tag
   pullPolicy: IfNotPresent
 
 # Digest-pinned shell copied into distroless broker pods. Override with an

@@ -10,6 +10,8 @@
 //! not use the operator version. The tag has the format that the component
 //! repository publishes:
 //!
+//! - krabka-io/krabka-broker promotes a tested image to `v<version>` when a
+//!   `v*` git tag is pushed.
 //! - krabka-io/krabka-connect promotes a tested image to `v<version>` when a
 //!   `v*` git tag is pushed.
 //! - krabka-io/krabka-schema-registry publishes `<version>`, with no `v`, from
@@ -20,6 +22,9 @@
 //! The version is the `[workspace.package] version` of the component
 //! repository. Change a default here when the operator moves to a new
 //! component release.
+
+/// Broker image of a `KafkaNodePool`, from krabka-io/krabka-broker.
+pub const BROKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-broker:v1.0.0";
 
 /// Worker image of a `KafkaConnector`, from krabka-io/krabka-connect.
 pub const CONNECT_WORKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-connect-worker:v0.4.1";
@@ -42,6 +47,7 @@ mod tests {
         // here. None of them may carry the operator version, because the
         // components release on their own.
         for (actual, expected) in [
+            (BROKER_IMAGE, "ghcr.io/krabka-io/krabka-broker:v1.0.0"),
             (
                 CONNECT_WORKER_IMAGE,
                 "ghcr.io/krabka-io/krabka-connect-worker:v0.4.1",
