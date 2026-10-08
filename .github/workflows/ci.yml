@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: krabka-io/krabka-rebalancer
-          ref: 9df7a58ec6f0e78b582e7d69c60b208a9c73644e
+          ref: d1df6e8d7f3d980b16b39d50752cb2a42a275f84
           path: .m20/rebalancer
       - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
         with:
@@ -48,7 +48,7 @@ jobs:
       - name: build, load and run the operator image
         run: bazel test -c opt --config=docker //packaging:image_docker_test --test_output=streamed
       - run: >-
-          bazel test --config=docker //:kind_lifecycle_test --test_env=EVIDENCE_DIR=${RUNNER_TEMP}/operator-evidence --test_env=BROKER_IMAGE=ghcr.io/krabka-io/krabka-broker@sha256:54ae711e5a7c8bdb03414402722f5c41dd50980ab315ab84d0803cca775fb463 --test_env=BROKER_REVISION=2a08a12ad4003c4c0807391ada24cfb89959b697 --test_env=REBALANCER_IMAGE=ghcr.io/krabka-io/krabka-rebalancer@sha256:97093c2ede1e754f302d9645ea2322999db68a040ab830e4b6ef8b7cb88714dc --test_env=REBALANCER_REVISION=9df7a58ec6f0e78b582e7d69c60b208a9c73644e --test_env=REBALANCER_CHART=${GITHUB_WORKSPACE}/.m20/rebalancer/charts/krabka-rebalancer --test_env=OPERATOR_REVISION=${GITHUB_SHA} --test_output=streamed
+          bazel test --config=docker //:kind_lifecycle_test --test_env=EVIDENCE_DIR=${RUNNER_TEMP}/operator-evidence --test_env=BROKER_IMAGE=ghcr.io/krabka-io/krabka-broker@sha256:117df778e3e8af143d8bc3681233c0151dc97d51cfafd3844c4daa09afaf9690 --test_env=BROKER_REVISION=8cbc01f3859b5ab24670c304ce6589c79c227cc9 --test_env=REBALANCER_IMAGE=ghcr.io/krabka-io/krabka-rebalancer@sha256:8122fad0f7df849f241373bd2a77dbe5fe1406604fd6262851a58af018c0b1b9 --test_env=REBALANCER_REVISION=d1df6e8d7f3d980b16b39d50752cb2a42a275f84 --test_env=REBALANCER_CHART=${GITHUB_WORKSPACE}/.m20/rebalancer/charts/krabka-rebalancer --test_env=OPERATOR_REVISION=${GITHUB_SHA} --test_output=streamed
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: github.event_name == 'push'
         with:
