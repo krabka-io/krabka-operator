@@ -27,14 +27,14 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { workspace = true, features = ["env"] }
-krabka-client-admin = { version = "0.5.0" }
-krabka-client-core = { version = "0.5.0" }
-krabka-client-producer = { version = "0.5.0" }
+krabka-client-admin = { version = "0.6.0" }
+krabka-client-core = { version = "0.6.0" }
+krabka-client-producer = { version = "0.6.0" }
 krabka-broker = { version = "0.7.0" }
-krabka-compression = { version = "0.5.0" }
+krabka-compression = { version = "0.6.0" }
 krabka-kraft-core = { version = "0.7.0" }
 krabka-logfmt = { version = "0.7.0" }
-krabka-metadata = { version = "0.5.0" }
+krabka-metadata = { version = "0.6.0" }
 krabka-object-store = { version = "0.7.0" }
 krabka-schema-serde = { version = "0.4.1" }
 krabka-security = { workspace = true }
