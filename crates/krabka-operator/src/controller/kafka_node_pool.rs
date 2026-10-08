@@ -566,7 +566,7 @@ if [ ! -f /var/lib/krabka/data/.formatted ]; then\n\
   if [ \"$KRABKA_QUORUM_BOOTSTRAP_INITIALIZED\" != \"true\" ] && [ \"$NODE_ID\" = \"$KRABKA_QUORUM_BOOTSTRAP_NODE_ID\" ] && [ \"$KRABKA_POOL_NAME\" = \"$KRABKA_QUORUM_BOOTSTRAP_POOL\" ]; then\n\
     /usr/bin/krabka-format --log-dir /var/lib/krabka/data --cluster-id \"$KRABKA_CLUSTER_ID\" --release-version \"$KRABKA_METADATA_VERSION\" --directory-id \"$KRABKA_DIRECTORY_ID\" --standalone --node-id \"$NODE_ID\" --controller-listener \"${HOSTNAME}.${KRABKA_HEADLESS_SERVICE}.${POD_NAMESPACE}.svc.cluster.local:9093\"\n\
   else\n\
-    /usr/bin/krabka-format --log-dir /var/lib/krabka/data --cluster-id \"$KRABKA_CLUSTER_ID\" --release-version \"$KRABKA_METADATA_VERSION\" --directory-id \"$KRABKA_DIRECTORY_ID\" --no-initial-controllers\n\
+    /usr/bin/krabka-format --log-dir /var/lib/krabka/data --cluster-id \"$KRABKA_CLUSTER_ID\" --release-version \"$KRABKA_METADATA_VERSION\" --directory-id \"$KRABKA_DIRECTORY_ID\" --node-id \"$NODE_ID\" --no-initial-controllers\n\
   fi\n\
   touch /var/lib/krabka/data/.formatted\n\
 fi\n\
@@ -3447,7 +3447,7 @@ mod tests {
         );
         let script = init["args"][0].as_str().expect("init script");
         assert!(script.contains("--standalone --node-id \"$NODE_ID\""));
-        assert!(script.contains("--no-initial-controllers"));
+        assert!(script.contains("--node-id \"$NODE_ID\" --no-initial-controllers"));
         assert!(script.contains("quorumDirectoryId-${NODE_ID}"));
         assert!(script.contains("KRABKA_QUORUM_BOOTSTRAP_INITIALIZED"));
         assert!(script.contains(
