@@ -51,10 +51,7 @@ pub(crate) const APP_LABEL: &str = "krabka-broker";
 pub(crate) const QUORUM_BOOTSTRAP_NODE_ID_KEY: &str = "quorumBootstrapNodeId";
 pub(crate) const QUORUM_BOOTSTRAP_POOL_KEY: &str = "quorumBootstrapPool";
 pub(crate) const QUORUM_BOOTSTRAP_INITIALIZED_KEY: &str = "quorumBootstrapInitialized";
-pub(crate) const DEFAULT_BROKER_IMAGE: &str = concat!(
-    "ghcr.io/krabka-io/krabka-broker:",
-    env!("CARGO_PKG_VERSION")
-);
+pub(crate) const DEFAULT_BROKER_IMAGE: &str = crate::controller::component_images::BROKER_IMAGE;
 
 pub(super) fn error_requeue(ctx: Arc<Context>) -> Action {
     let delay = ctx.config.controller_error_requeue;
