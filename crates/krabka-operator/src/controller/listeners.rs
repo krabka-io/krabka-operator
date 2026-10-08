@@ -4875,13 +4875,7 @@ mod toml_rendering_tests {
 
         let parsed: krabka_broker::file_config::FileConfig =
             toml::from_str(&toml_str).expect("rendered TOML must parse with broker FileConfig");
-        // `FileConfig` carries krabka-broker's own copy of krabka-security,
-        // which can be a different crate version from this repo's, so the
-        // two `ListenerProtocol` types are compared by their variant name.
-        assert!(
-            format!("{:?}", parsed.controller_listener_protocol)
-                == format!("{:?}", Some(ListenerProtocol::Ssl))
-        );
+        assert!(parsed.controller_listener_protocol == Some(ListenerProtocol::Ssl));
         let parsed_tls = parsed.tls_config.expect("tls_config emitted");
         assert!(parsed_tls.cert_path == std::path::PathBuf::from("/etc/krabka/broker-tls/0.crt"));
         // The cluster CA must be wired as the controller-quorum TLS trust
