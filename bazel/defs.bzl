@@ -30,7 +30,7 @@ WORKSPACE_RUSTC_FLAGS = ["-Funsafe_code"]
 # into `--version`, so a Bazel build without it ships an operator that asks
 # for `:0.0.0` images. `//packaging:version_test` fails when this
 # value and `Cargo.toml` differ.
-WORKSPACE_VERSION = "0.5.0"
+WORKSPACE_VERSION = "1.0.0"
 
 def _features():
     return DEP_DATA[native.package_name()]["crate_features"]
