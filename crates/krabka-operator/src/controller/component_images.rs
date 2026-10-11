@@ -24,7 +24,7 @@
 //! component release.
 
 /// Broker image of a `KafkaNodePool`, from krabka-io/krabka-broker.
-pub const BROKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-broker:v1.0.0";
+pub const BROKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-broker:v1.0.2";
 
 /// Worker image of a `KafkaConnector`, from krabka-io/krabka-connect.
 pub const CONNECT_WORKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-connect-worker:v0.4.1";
@@ -47,7 +47,7 @@ mod tests {
         // here. None of them may carry the operator version, because the
         // components release on their own.
         for (actual, expected) in [
-            (BROKER_IMAGE, "ghcr.io/krabka-io/krabka-broker:v1.0.0"),
+            (BROKER_IMAGE, "ghcr.io/krabka-io/krabka-broker:v1.0.2"),
             (
                 CONNECT_WORKER_IMAGE,
                 "ghcr.io/krabka-io/krabka-connect-worker:v0.4.1",
