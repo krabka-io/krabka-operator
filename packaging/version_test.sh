@@ -13,7 +13,7 @@ actual="$("${binary}" --version)"
 
 if [[ "${actual}" != "${expected}" ]]; then
     echo "version_test: the binary reports '${actual}', Cargo.toml says '${expected}'." >&2
-    echo "  Set WORKSPACE_VERSION in //bazel:defs.bzl to the Cargo.toml version." >&2
+    echo "  Set the MODULE.bazel version to the Cargo.toml version." >&2
     exit 1
 fi
 

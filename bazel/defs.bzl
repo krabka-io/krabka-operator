@@ -29,8 +29,7 @@ WORKSPACE_RUSTC_FLAGS = ["-Funsafe_code"]
 # absent. The operator puts `CARGO_PKG_VERSION` into default image tags and
 # into `--version`, so a Bazel build without it ships an operator that asks
 # for `:0.0.0` images. `//packaging:version_test` fails when this
-# value and `Cargo.toml` differ.
-WORKSPACE_VERSION = "1.0.1"
+# module version and `Cargo.toml` differ.
 
 def _features():
     return DEP_DATA[native.package_name()]["crate_features"]
@@ -125,7 +124,7 @@ def crate_library(
         crate_features = _features(),
         crate_name = crate_name(),
         edition = edition(),
-        version = WORKSPACE_VERSION,
+        version = native.module_version(),
         rustc_flags = WORKSPACE_RUSTC_FLAGS,
         visibility = ["//visibility:public"],
         deps = deps,
@@ -173,7 +172,7 @@ def crate_binary(name, crate_root, lib = None, srcs = None, tests = True, **kwar
         crate_features = _features(),
         crate_root = crate_root,
         edition = edition(),
-        version = WORKSPACE_VERSION,
+        version = native.module_version(),
         rustc_flags = WORKSPACE_RUSTC_FLAGS,
         visibility = ["//visibility:public"],
         deps = all_crate_deps(normal = True) + ([lib] if lib else []),
@@ -187,7 +186,7 @@ def crate_binary(name, crate_root, lib = None, srcs = None, tests = True, **kwar
             crate = ":" + name,
             crate_features = _features(),
             edition = edition(),
-            version = WORKSPACE_VERSION,
+            version = native.module_version(),
             rustc_flags = WORKSPACE_RUSTC_FLAGS,
             deps = all_crate_deps(normal_dev = True),
         )
@@ -241,7 +240,7 @@ def crate_tests(
         crate_features = _features(),
         data = data or [],
         edition = edition(),
-        version = WORKSPACE_VERSION,
+        version = native.module_version(),
         env = env,
         rustc_env = rustc_env,
         rustc_flags = WORKSPACE_RUSTC_FLAGS,
@@ -293,7 +292,7 @@ def crate_tests(
             crate_features = _features(),
             data = data or [],
             edition = edition(),
-            version = WORKSPACE_VERSION,
+            version = native.module_version(),
             env = env,
             rustc_env = rustc_env,
             rustc_flags = WORKSPACE_RUSTC_FLAGS,

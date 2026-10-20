@@ -31,10 +31,7 @@ spec:
                         nullable: true
                         type: string
                       usersSecretName:
-                        description: |-
-                          Secret with one key that holds `user:cred` entries, one on each
-                          line. The cred is plaintext or a `$2…` bcrypt hash. The operator
-                          mounts the key as a file and gives it in `--basic-auth-file`.
+                        description: "Secret with one key that holds `user:cred` entries, one on each\nline. The cred is plaintext or a `$2…` bcrypt hash. The operator\nmounts the key as a file and gives it in `--basic-auth-file`."
                         type: string
                     required:
                     - usersSecretName
@@ -51,9 +48,7 @@ spec:
                         nullable: true
                         type: string
                       jwksPrincipalClaim:
-                        description: |-
-                          JWT claim to use as the principal when the mode is `Jwks`. It
-                          overrides `principalClaim` on the JWKS paths.
+                        description: "JWT claim to use as the principal when the mode is `Jwks`. It\noverrides `principalClaim` on the JWKS paths."
                         nullable: true
                         type: string
                       jwksRefresh:
@@ -61,9 +56,7 @@ spec:
                         nullable: true
                         type: string
                       jwksTlsSecretName:
-                        description: |-
-                          Name of the Secret whose `ca.crt` key the operator mounts and
-                          gives in `--bearer-jwks-ca`.
+                        description: "Name of the Secret whose `ca.crt` key the operator mounts and\ngives in `--bearer-jwks-ca`."
                         nullable: true
                         type: string
                       jwksValidIssuer:
@@ -83,7 +76,7 @@ spec:
                     - mode
                     type: object
                   realm:
-                    description: '`WWW-Authenticate: basic realm="<realm>"`.'
+                    description: "`WWW-Authenticate: basic realm=\"<realm>\"`."
                     nullable: true
                     type: string
                   requireAuth:
@@ -108,12 +101,7 @@ spec:
                     type: array
                 type: object
               bootstrapServers:
-                description: |-
-                  Bootstrap override for an external Kafka that the operator does
-                  not manage. When unset, the operator derives the bootstrap from the
-                  internal listener of the Kafka with the `krabka.io/cluster` label.
-                  Settings in `kafka_client` secure both external and managed bootstrap
-                  connections.
+                description: "Bootstrap override for an external Kafka that the operator does\nnot manage. When unset, the operator derives the bootstrap from the\ninternal listener of the Kafka with the `krabka.io/cluster` label.\nSettings in `kafka_client` secure both external and managed bootstrap\nconnections."
                 nullable: true
                 type: string
               clientId:
@@ -150,37 +138,24 @@ spec:
                     nullable: true
                     type: integer
                   startupFailureThreshold:
-                    description: |-
-                      Failed startup probes before the kubelet restarts the container.
-                      Default 60.
-
-                      Set it so that `startupPeriodSeconds` times this value covers the
-                      longest replay of the schemas topic. The defaults allow 5 minutes.
+                    description: "Failed startup probes before the kubelet restarts the container.\nDefault 60.\n\nSet it so that `startupPeriodSeconds` times this value covers the\nlongest replay of the schemas topic. The defaults allow 5 minutes."
                     format: int32
                     minimum: 1.0
                     nullable: true
                     type: integer
                   startupPeriodSeconds:
-                    description: |-
-                      Seconds between two startup probes. Default 5.
-
-                      The registry binds its REST port only after it replays the schemas
-                      topic. The startup probe holds the liveness probe back until then.
+                    description: "Seconds between two startup probes. Default 5.\n\nThe registry binds its REST port only after it replays the schemas\ntopic. The startup probe holds the liveness probe back until then."
                     format: int32
                     minimum: 1.0
                     nullable: true
                     type: integer
                 type: object
               image:
-                description: |-
-                  Container image. Defaults to the operator's
-                  `--default-schema-registry-image`.
+                description: "Container image. Defaults to the operator's\n`--default-schema-registry-image`."
                 nullable: true
                 type: string
               kafkaClient:
-                description: |-
-                  Client security from the SR to the broker, with SASL and TLS. It
-                  maps to the `--kafka-*` flags.
+                description: "Client security from the SR to the broker, with SASL and TLS. It\nmaps to the `--kafka-*` flags."
                 nullable: true
                 properties:
                   sasl:
@@ -216,9 +191,7 @@ spec:
                     type: object
                 type: object
               replicas:
-                description: |-
-                  Number of stateless replicas. All of them join the election
-                  group. Default 1.
+                description: "Number of stateless replicas. All of them join the election\ngroup. Default 1."
                 format: int32
                 maximum: 1000.0
                 minimum: 1.0
@@ -228,12 +201,7 @@ spec:
                 nullable: true
                 properties:
                   claims:
-                    description: |-
-                      Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.
-
-                      This is an alpha field and requires enabling the DynamicResourceAllocation feature gate.
-
-                      This field is immutable. It can only be set for containers.
+                    description: "Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.\n\nThis is an alpha field and requires enabling the DynamicResourceAllocation feature gate.\n\nThis field is immutable. It can only be set for containers."
                     items:
                       description: ResourceClaim references one entry in PodSpec.ResourceClaims.
                       properties:
@@ -251,13 +219,13 @@ spec:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                   requests:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                 type: object
               runtime:
@@ -331,15 +299,11 @@ spec:
                     nullable: true
                     type: string
                   clientCaSecretName:
-                    description: |-
-                      Secret with `ca.crt` that verifies the client certs. It is
-                      necessary when `clientAuth` is not Disabled.
+                    description: "Secret with `ca.crt` that verifies the client certs. It is\nnecessary when `clientAuth` is not Disabled."
                     nullable: true
                     type: string
                   issuerRef:
-                    description: |-
-                      cert-manager issuer reference. Do not set it together with
-                      `secretName`.
+                    description: "cert-manager issuer reference. Do not set it together with\n`secretName`."
                     nullable: true
                     properties:
                       group:
@@ -347,9 +311,7 @@ spec:
                         nullable: true
                         type: string
                       kind:
-                        description: |-
-                          The default is `Issuer`. Set `ClusterIssuer` for an issuer with
-                          cluster scope.
+                        description: "The default is `Issuer`. Set `ClusterIssuer` for an issuer with\ncluster scope."
                         nullable: true
                         type: string
                       name:
@@ -358,9 +320,7 @@ spec:
                     - name
                     type: object
                   secretName:
-                    description: |-
-                      Secret of type kubernetes.io/tls with `tls.crt` and `tls.key`. Do
-                      not set it together with `issuerRef`.
+                    description: "Secret of type kubernetes.io/tls with `tls.crt` and `tls.key`. Do\nnot set it together with `issuerRef`."
                     nullable: true
                     type: string
                 type: object
@@ -372,9 +332,7 @@ spec:
             properties:
               conditions:
                 default: []
-                description: |-
-                  Kubernetes-style conditions: `KafkaReady`, `Available`, and
-                  `Ready`.
+                description: "Kubernetes-style conditions: `KafkaReady`, `Available`, and\n`Ready`."
                 items:
                   properties:
                     lastTransitionTime:
@@ -387,7 +345,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -401,7 +359,7 @@ spec:
                   type: object
                 type: array
               observedGeneration:
-                description: '`metadata.generation` of the last successfully-reconciled spec.'
+                description: "`metadata.generation` of the last successfully-reconciled spec."
                 format: int64
                 nullable: true
                 type: integer

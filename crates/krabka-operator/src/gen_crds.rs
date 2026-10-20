@@ -30,7 +30,11 @@ where
     let group = &crd.spec.group;
     let plural = &crd.spec.names.plural;
     let file = out_dir.join(format!("{group}_{plural}.yaml"));
-    let yaml = serde_yaml::to_string(&crd)?;
+    // Keep generated CRDs free of indentation-only lines in multiline descriptions.
+    let yaml = serde_yaml::to_string_with_options(
+        &crd,
+        serde_yaml::ser_options! { prefer_block_scalars: false },
+    )?;
     fs::write(&file, yaml)?;
     eprintln!("wrote {}", file.display());
     Ok(())
@@ -39,6 +43,7 @@ where
 #[cfg(test)]
 mod tests {
     use assert2::assert;
+    use kube::CustomResourceExt as _;
     use tempfile::tempdir;
 
     use super::*;
@@ -47,7 +52,7 @@ mod tests {
     fn writes_kafka_pool_topic_and_user_crd_files() {
         let dir = tempdir().unwrap();
         write_all(dir.path()).unwrap();
-        for (file, plural, short_name) in [
+        for ((file, plural, short_name), crd) in [
             ("krabka.io_kafkas.yaml", "plural: kafkas", None),
             (
                 "krabka.io_kafkanodepools.yaml",
@@ -84,10 +89,25 @@ mod tests {
                 "plural: schemaregistries",
                 Some("- sr"),
             ),
-        ] {
+        ]
+        .into_iter()
+        .zip([
+            Kafka::crd(),
+            KafkaNodePool::crd(),
+            KafkaTopic::crd(),
+            KafkaUser::crd(),
+            KafkaRebalance::crd(),
+            KafkaGrpcGateway::crd(),
+            KafkaConnector::crd(),
+            SchemaRegistry::crd(),
+        ]) {
             let path = dir.path().join(file);
             assert!(path.exists(), "case {file:?}");
             let yaml = std::fs::read_to_string(&path).unwrap();
+            let actual: serde_json::Value = serde_yaml::from_str(&yaml).unwrap();
+            let expected = serde_json::to_value(crd).unwrap();
+            assert!(actual == expected, "schema data changed in {file}");
+            assert!(yaml.lines().all(|line| line.trim_end() == line));
             assert!(yaml.contains(plural), "case {file:?}");
             if let Some(short) = short_name {
                 assert!(yaml.contains(short), "case {file:?}");
