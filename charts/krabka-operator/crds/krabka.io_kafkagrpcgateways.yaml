@@ -20,16 +20,9 @@ spec:
           spec:
             properties:
               allowedTargets:
-                description: |-
-                  Explicit SSRF allowlist for outbound HTTP targets. The controller
-                  derives the entries from the `targetUrl` of each subscription. Use
-                  this field to add more allowed hosts.
+                description: "Explicit SSRF allowlist for outbound HTTP targets. The controller\nderives the entries from the `targetUrl` of each subscription. Use\nthis field to add more allowed hosts."
                 items:
-                  description: |-
-                    One entry in the SSRF allowlist of the gateway.
-
-                    The gateway permits an outbound HTTP request only when `scheme` and
-                    `host` match.
+                  description: "One entry in the SSRF allowlist of the gateway.\n\nThe gateway permits an outbound HTTP request only when `scheme` and\n`host` match."
                   properties:
                     host:
                       description: Hostname of the allowed target, with an optional port.
@@ -43,27 +36,19 @@ spec:
                   type: object
                 type: array
               authz:
-                description: |-
-                  Authorization configuration. When absent, the gateway uses simple
-                  ACL-based authorization, which is mode `simple`.
+                description: "Authorization configuration. When absent, the gateway uses simple\nACL-based authorization, which is mode `simple`."
                 nullable: true
                 properties:
                   aclRefresh:
-                    description: |-
-                      How often the gateway refreshes its ACL cache from the broker,
-                      as a unit-carrying duration. Default `60s`.
+                    description: "How often the gateway refreshes its ACL cache from the broker,\nas a unit-carrying duration. Default `60s`."
                     nullable: true
                     type: string
                   bearer:
-                    description: |-
-                      Bearer-token authentication configuration. When absent,
-                      bearer auth is disabled.
+                    description: "Bearer-token authentication configuration. When absent,\nbearer auth is disabled."
                     nullable: true
                     properties:
                       allowableClockSkew:
-                        description: |-
-                          Allowable clock skew for bearer-token timestamps, as a
-                          unit-carrying duration such as `30s` or `500ms`.
+                        description: "Allowable clock skew for bearer-token timestamps, as a\nunit-carrying duration such as `30s` or `500ms`."
                         nullable: true
                         type: string
                       mode:
@@ -76,30 +61,21 @@ spec:
                         type: string
                     type: object
                   mode:
-                    description: |-
-                      Authorization mode. One of `off` or `simple`. Default `simple`,
-                      which is ACL-based and reads the `KafkaUser` ACLs from the broker.
+                    description: "Authorization mode. One of `off` or `simple`. Default `simple`,\nwhich is ACL-based and reads the `KafkaUser` ACLs from the broker."
                     nullable: true
                     type: string
                   superUsers:
-                    description: |-
-                      Principal strings, for example `User:admin`, that bypass all ACL
-                      checks.
+                    description: "Principal strings, for example `User:admin`, that bypass all ACL\nchecks."
                     items:
                       type: string
                     type: array
                 type: object
               dedup:
-                description: |-
-                  Configuration for the deduplication topic below the idempotent
-                  produce, which gives exactly-once delivery. When absent, the
-                  controller defaults apply.
+                description: "Configuration for the deduplication topic below the idempotent\nproduce, which gives exactly-once delivery. When absent, the\ncontroller defaults apply."
                 nullable: true
                 properties:
                   ownershipGroup:
-                    description: |-
-                      Consumer group used to divide dedup ownership between replicas.
-                      Defaults to a value derived from the gateway name.
+                    description: "Consumer group used to divide dedup ownership between replicas.\nDefaults to a value derived from the gateway name."
                     nullable: true
                     type: string
                   partitions:
@@ -110,22 +86,15 @@ spec:
                     nullable: true
                     type: integer
                   topic:
-                    description: |-
-                      Kafka topic used to store dedup state. Defaults to
-                      `<gateway-name>-dedup` when absent.
+                    description: "Kafka topic used to store dedup state. Defaults to\n`<gateway-name>-dedup` when absent."
                     nullable: true
                     type: string
                   txnIdPrefix:
-                    description: |-
-                      Prefix for transactional producer IDs. Defaults to the gateway
-                      name. The full `transactional.id` is `<prefix>-<partition>`.
+                    description: "Prefix for transactional producer IDs. Defaults to the gateway\nname. The full `transactional.id` is `<prefix>-<partition>`."
                     nullable: true
                     type: string
                   window:
-                    description: |-
-                      Dedup window, as a unit-carrying duration such as `24h` or `30m`.
-                      The gateway drops records with the same idempotency key inside this
-                      window. Default `24h`.
+                    description: "Dedup window, as a unit-carrying duration such as `24h` or `30m`.\nThe gateway drops records with the same idempotency key inside this\nwindow. Default `24h`."
                     nullable: true
                     type: string
                 type: object
@@ -155,9 +124,7 @@ spec:
                     type: integer
                 type: object
               image:
-                description: |-
-                  Container image override. When absent, the operator uses its
-                  `--default-gateway-image` flag.
+                description: "Container image override. When absent, the operator uses its\n`--default-gateway-image` flag."
                 nullable: true
                 type: string
               membershipTopic:
@@ -165,26 +132,16 @@ spec:
                 nullable: true
                 type: string
               outboundSubscriptions:
-                description: |-
-                  Outbound webhook subscriptions. Each entry reads from
-                  `sourceTopics` and HTTP-POSTs records to `targetUrl`.
+                description: "Outbound webhook subscriptions. Each entry reads from\n`sourceTopics` and HTTP-POSTs records to `targetUrl`."
                 items:
-                  description: |-
-                    One outbound webhook subscription.
-
-                    The gateway reads from `sourceTopics` and sends each record to
-                    `targetUrl` with an HTTP POST.
+                  description: "One outbound webhook subscription.\n\nThe gateway reads from `sourceTopics` and sends each record to\n`targetUrl` with an HTTP POST."
                   properties:
                     baseBackoff:
-                      description: |-
-                        Initial backoff for exponential retry, as a unit-carrying duration.
-                        Default `500ms`.
+                      description: "Initial backoff for exponential retry, as a unit-carrying duration.\nDefault `500ms`."
                       nullable: true
                       type: string
                     deadLetterTopic:
-                      description: |-
-                        Kafka topic for the records that used all their delivery attempts.
-                        When absent, the gateway logs a failed record and discards it.
+                      description: "Kafka topic for the records that used all their delivery attempts.\nWhen absent, the gateway logs a failed record and discards it."
                       nullable: true
                       type: string
                     decodeToJson:
@@ -192,9 +149,7 @@ spec:
                       nullable: true
                       type: boolean
                     filter:
-                      description: |-
-                        CEL expression evaluated against the record to decide whether to
-                        deliver it. An absent or empty filter delivers all records.
+                      description: "CEL expression evaluated against the record to decide whether to\ndeliver it. An absent or empty filter delivers all records."
                       nullable: true
                       type: string
                     groupId:
@@ -207,9 +162,7 @@ spec:
                       description: Static HTTP headers appended to every delivery request.
                       type: object
                     maxAttempts:
-                      description: |-
-                        Maximum number of delivery attempts before moving the record to
-                        the dead-letter topic. Default 5.
+                      description: "Maximum number of delivery attempts before moving the record to\nthe dead-letter topic. Default 5."
                       format: uint32
                       minimum: 1.0
                       nullable: true
@@ -219,18 +172,14 @@ spec:
                       nullable: true
                       type: string
                     name:
-                      description: |-
-                        Unique name for this subscription. It is the suffix of the
-                        consumer group id.
+                      description: "Unique name for this subscription. It is the suffix of the\nconsumer group id."
                       type: string
                     requestTimeout:
                       description: HTTP request timeout, as a unit-carrying duration. Default `10s`.
                       nullable: true
                       type: string
                     signingSecretRef:
-                      description: |-
-                        Secret key reference for the HMAC signing secret of the outbound
-                        request. The controller resolves it at render time.
+                      description: "Secret key reference for the HMAC signing secret of the outbound\nrequest. The controller resolves it at render time."
                       nullable: true
                       properties:
                         key:
@@ -267,12 +216,7 @@ spec:
                 nullable: true
                 properties:
                   claims:
-                    description: |-
-                      Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.
-
-                      This is an alpha field and requires enabling the DynamicResourceAllocation feature gate.
-
-                      This field is immutable. It can only be set for containers.
+                    description: "Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.\n\nThis is an alpha field and requires enabling the DynamicResourceAllocation feature gate.\n\nThis field is immutable. It can only be set for containers."
                     items:
                       description: ResourceClaim references one entry in PodSpec.ResourceClaims.
                       properties:
@@ -290,13 +234,13 @@ spec:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                   requests:
                     additionalProperties:
                       description: "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation."
                       x-kubernetes-int-or-string: true
-                    description: 'Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                    description: "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                 type: object
               schemaRegistry:
@@ -314,15 +258,11 @@ spec:
                     type: string
                 type: object
               telemetry:
-                description: |-
-                  OpenTelemetry / observability configuration. When absent,
-                  the gateway exports no telemetry.
+                description: "OpenTelemetry / observability configuration. When absent,\nthe gateway exports no telemetry."
                 nullable: true
                 properties:
                   otlpEndpoint:
-                    description: |-
-                      OTLP exporter endpoint URL, for example
-                      `http://otel-collector.observability.svc:4317`.
+                    description: "OTLP exporter endpoint URL, for example\n`http://otel-collector.observability.svc:4317`."
                     nullable: true
                     type: string
                   otlpProtocol:
@@ -330,9 +270,7 @@ spec:
                     nullable: true
                     type: string
                   sampleRatio:
-                    description: |-
-                      Fraction of traces to sample, in the range `[0.0, 1.0]`. Default
-                      1.0, which samples all traces.
+                    description: "Fraction of traces to sample, in the range `[0.0, 1.0]`. Default\n1.0, which samples all traces."
                     format: double
                     maximum: 1.0
                     minimum: 0.0
@@ -340,15 +278,11 @@ spec:
                     type: number
                 type: object
               tls:
-                description: |-
-                  TLS serving configuration. When absent, the TLS defaults apply:
-                  `clientAuth: required` and `validityDays: 365`.
+                description: "TLS serving configuration. When absent, the TLS defaults apply:\n`clientAuth: required` and `validityDays: 365`."
                 nullable: true
                 properties:
                   clientAuth:
-                    description: |-
-                      How the gateway authenticates inbound clients.
-                      One of `disabled`, `optional`, `required`. Default `required`.
+                    description: "How the gateway authenticates inbound clients.\nOne of `disabled`, `optional`, `required`. Default `required`."
                     nullable: true
                     type: string
                   reloadInterval:
@@ -413,35 +347,22 @@ spec:
                     type: string
                 type: object
               webhooks:
-                description: |-
-                  Inbound HTTP-webhook endpoints. Each entry creates one
-                  authenticated ingress route that produces records to
-                  `targetTopic`.
+                description: "Inbound HTTP-webhook endpoints. Each entry creates one\nauthenticated ingress route that produces records to\n`targetTopic`."
                 items:
-                  description: |-
-                    One inbound HTTP-webhook endpoint.
-
-                    The gateway does one produce call against `targetTopic` for every
-                    verified POST to `/<name>`.
+                  description: "One inbound HTTP-webhook endpoint.\n\nThe gateway does one produce call against `targetTopic` for every\nverified POST to `/<name>`."
                   properties:
                     forwardHeaders:
-                      description: |-
-                        Request headers to preserve as Kafka record headers. Authentication
-                        credentials and webhook signatures cannot be forwarded.
+                      description: "Request headers to preserve as Kafka record headers. Authentication\ncredentials and webhook signatures cannot be forwarded."
                       items:
                         type: string
                       nullable: true
                       type: array
                     idempotencySource:
-                      description: |-
-                        How to derive the idempotency key for deduplication, for example
-                        `header:X-Idempotency-Key` or `body_hash`.
+                      description: "How to derive the idempotency key for deduplication, for example\n`header:X-Idempotency-Key` or `body_hash`."
                       nullable: true
                       type: string
                     keySource:
-                      description: |-
-                        How to derive the Kafka record key from the request, for example
-                        `header:X-Record-Key` or `body_path:.id`.
+                      description: "How to derive the Kafka record key from the request, for example\n`header:X-Record-Key` or `body_path:.id`."
                       nullable: true
                       type: string
                     maxBody:
@@ -452,13 +373,11 @@ spec:
                       description: Unique name for this webhook route. It is the URL path segment.
                       type: string
                     principal:
-                      description: |-
-                        Kafka principal for ACL checks on produce to `targetTopic`.
-                        Defaults to the gateway service account principal when absent.
+                      description: "Kafka principal for ACL checks on produce to `targetTopic`.\nDefaults to the gateway service account principal when absent."
                       nullable: true
                       type: string
                     schemaFormat:
-                      description: 'Structured payload format: `avro`, `json`, or `protobuf`.'
+                      description: "Structured payload format: `avro`, `json`, or `protobuf`."
                       nullable: true
                       type: string
                     schemaSubject:
@@ -466,11 +385,7 @@ spec:
                       nullable: true
                       type: string
                     secretRef:
-                      description: |-
-                        Kubernetes Secret key reference for the HMAC signing secret or the
-                        Standard Webhooks signing token required by `signatureMode`. The
-                        controller resolves it at render time and puts the raw secret value
-                        into the config Secret. The CRD never stores that value.
+                      description: "Kubernetes Secret key reference for the HMAC signing secret or the\nStandard Webhooks signing token required by `signatureMode`. The\ncontroller resolves it at render time and puts the raw secret value\ninto the config Secret. The CRD never stores that value."
                       nullable: true
                       properties:
                         key:
@@ -488,36 +403,26 @@ spec:
                       nullable: true
                       type: string
                     signatureHeader:
-                      description: |-
-                        HTTP header that carries the HMAC signature, for example
-                        `X-Hub-Signature-256`.
+                      description: "HTTP header that carries the HMAC signature, for example\n`X-Hub-Signature-256`."
                       nullable: true
                       type: string
                     signatureMode:
-                      description: |-
-                        Signature protocol. Set `standard_webhooks` to verify the signed
-                        message ID, timestamp, and body; omit for body-only HMAC verification.
+                      description: "Signature protocol. Set `standard_webhooks` to verify the signed\nmessage ID, timestamp, and body; omit for body-only HMAC verification."
                       nullable: true
                       type: string
                     signaturePrefix:
-                      description: |-
-                        Prefix to remove from the signature header value before the
-                        gateway verifies it, for example `sha256=`.
+                      description: "Prefix to remove from the signature header value before the\ngateway verifies it, for example `sha256=`."
                       nullable: true
                       type: string
                     targetTopic:
                       description: Kafka topic that the gateway produces the records to.
                       type: string
                     timestampHeader:
-                      description: |-
-                        HTTP header that carries the request timestamp. The gateway uses
-                        it with `timestampTolerance` to reject replayed requests.
+                      description: "HTTP header that carries the request timestamp. The gateway uses\nit with `timestampTolerance` to reject replayed requests."
                       nullable: true
                       type: string
                     timestampTolerance:
-                      description: |-
-                        Maximum age of a request timestamp before it is rejected as a replay,
-                        as a unit-carrying duration. Default `300s`.
+                      description: "Maximum age of a request timestamp before it is rejected as a replay,\nas a unit-carrying duration. Default `300s`."
                       nullable: true
                       type: string
                   required:
@@ -532,9 +437,7 @@ spec:
             properties:
               conditions:
                 default: []
-                description: |-
-                  Standard Kubernetes-style condition list. It reports `Ready`,
-                  `KafkaVersionValid`, `CertReady`, and `Degraded`.
+                description: "Standard Kubernetes-style condition list. It reports `Ready`,\n`KafkaVersionValid`, `CertReady`, and `Degraded`."
                 items:
                   properties:
                     lastTransitionTime:
@@ -547,7 +450,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -561,7 +464,7 @@ spec:
                   type: object
                 type: array
               observedGeneration:
-                description: '`metadata.generation` of the last successfully-reconciled spec.'
+                description: "`metadata.generation` of the last successfully-reconciled spec."
                 format: int64
                 nullable: true
                 type: integer

@@ -18,21 +18,10 @@ spec:
         description: Auto-generated derived type for KafkaSpec via `CustomResource`
         properties:
           spec:
-            description: |-
-              Krabka cluster spec. The spec carries only the version label. Sibling
-              `KafkaNodePool`s labeled `krabka.io/cluster=<this name>` describe the
-              broker pods.
+            description: "Krabka cluster spec. The spec carries only the version label. Sibling\n`KafkaNodePool`s labeled `krabka.io/cluster=<this name>` describe the\nbroker pods."
             properties:
               authorization:
-                description: |-
-                  Cluster-level authorizer selection. When `None`, the broker uses the
-                  default `AllowAll` authorizer and makes no ACL checks. When `Some`, the
-                  operator renders the `[authorization]` TOML section, so the broker
-                  builds the matching `Arc<dyn Authorizer>`. That is
-                  `SimpleAclAuthorizer` for `type: simple`, and `OpaAuthorizer` for
-                  `type: opa`. With `simple` or `opa` selected, the operator's
-                  inter-broker principal MUST appear in `super_users`. There is no
-                  implicit `ANONYMOUS` allow, and operators must opt in explicitly.
+                description: "Cluster-level authorizer selection. When `None`, the broker uses the\ndefault `AllowAll` authorizer and makes no ACL checks. When `Some`, the\noperator renders the `[authorization]` TOML section, so the broker\nbuilds the matching `Arc<dyn Authorizer>`. That is\n`SimpleAclAuthorizer` for `type: simple`, and `OpaAuthorizer` for\n`type: opa`. With `simple` or `opa` selected, the operator's\ninter-broker principal MUST appear in `super_users`. There is no\nimplicit `ANONYMOUS` allow, and operators must opt in explicitly."
                 nullable: true
                 properties:
                   allowOnError:
@@ -554,25 +543,16 @@ spec:
                     type: integer
                 type: object
               clientsCa:
-                description: |-
-                  Per-cluster CA that signs `KafkaUser` TLS certs. When absent, the
-                  operator uses a fully-defaulted `CertificateAuthority`.
+                description: "Per-cluster CA that signs `KafkaUser` TLS certs. When absent, the\noperator uses a fully-defaulted `CertificateAuthority`."
                 nullable: true
                 properties:
                   generateCertificateAuthority:
                     default: true
-                    description: |-
-                      When `true`, which is the default, the operator generates and
-                      renews this CA. When `false`, the cluster admin must create the CA
-                      `Secret` pair first, and the operator refuses to overwrite them.
-                      The admin renews a BYO CA. The `CronJob` skips a BYO CA and emits
-                      an Event when the CA comes near its expiry.
+                    description: "When `true`, which is the default, the operator generates and\nrenews this CA. When `false`, the cluster admin must create the CA\n`Secret` pair first, and the operator refuses to overwrite them.\nThe admin renews a BYO CA. The `CronJob` skips a BYO CA and emits\nan Event when the CA comes near its expiry."
                     type: boolean
                   renewalDays:
                     default: 30
-                    description: |-
-                      Window in days before `notAfter` in which the renewal `CronJob`
-                      reissues the leaf certs. Default 30.
+                    description: "Window in days before `notAfter` in which the renewal `CronJob`\nreissues the leaf certs. Default 30."
                     format: uint32
                     minimum: 0.0
                     type: integer
@@ -584,26 +564,16 @@ spec:
                     type: integer
                 type: object
               clusterCa:
-                description: |-
-                  Per-cluster CA for inter-broker mTLS and broker certs. When absent,
-                  the operator uses a fully-defaulted `CertificateAuthority`, which it
-                  generates itself with 365/30 days.
+                description: "Per-cluster CA for inter-broker mTLS and broker certs. When absent,\nthe operator uses a fully-defaulted `CertificateAuthority`, which it\ngenerates itself with 365/30 days."
                 nullable: true
                 properties:
                   generateCertificateAuthority:
                     default: true
-                    description: |-
-                      When `true`, which is the default, the operator generates and
-                      renews this CA. When `false`, the cluster admin must create the CA
-                      `Secret` pair first, and the operator refuses to overwrite them.
-                      The admin renews a BYO CA. The `CronJob` skips a BYO CA and emits
-                      an Event when the CA comes near its expiry.
+                    description: "When `true`, which is the default, the operator generates and\nrenews this CA. When `false`, the cluster admin must create the CA\n`Secret` pair first, and the operator refuses to overwrite them.\nThe admin renews a BYO CA. The `CronJob` skips a BYO CA and emits\nan Event when the CA comes near its expiry."
                     type: boolean
                   renewalDays:
                     default: 30
-                    description: |-
-                      Window in days before `notAfter` in which the renewal `CronJob`
-                      reissues the leaf certs. Default 30.
+                    description: "Window in days before `notAfter` in which the renewal `CronJob`\nreissues the leaf certs. Default 30."
                     format: uint32
                     minimum: 0.0
                     type: integer
@@ -617,29 +587,15 @@ spec:
               config:
                 additionalProperties:
                   type: string
-                description: |-
-                  Opaque broker properties, in `server.properties`-style key and value
-                  pairs. The operator passes them through to the broker's
-                  `[server_properties]` TOML table, and the broker treats them as inert
-                  today. Changes propagate through the config hash.
+                description: "Opaque broker properties, in `server.properties`-style key and value\npairs. The operator passes them through to the broker's\n`[server_properties]` TOML table, and the broker treats them as inert\ntoday. Changes propagate through the config hash."
                 nullable: true
                 type: object
               delegationToken:
-                description: |-
-                  Delegation-token master HMAC key source. When `None`, the broker
-                  rejects all KIP-48 delegation-token RPCs with err 61
-                  `DELEGATION_TOKEN_AUTH_DISABLED`. When `Some`, the operator injects
-                  `KRABKA_DELEGATION_TOKEN_SECRET_KEY` into each broker pod through a
-                  `valueFrom.secretKeyRef`. The key is then part of the rendered
-                  `StatefulSet`, so the SSA reconcile does not race with out-of-band
-                  `kubectl set env` patches.
+                description: "Delegation-token master HMAC key source. When `None`, the broker\nrejects all KIP-48 delegation-token RPCs with err 61\n`DELEGATION_TOKEN_AUTH_DISABLED`. When `Some`, the operator injects\n`KRABKA_DELEGATION_TOKEN_SECRET_KEY` into each broker pod through a\n`valueFrom.secretKeyRef`. The key is then part of the rendered\n`StatefulSet`, so the SSA reconcile does not race with out-of-band\n`kubectl set env` patches."
                 nullable: true
                 properties:
                   secretKeyRef:
-                    description: |-
-                      Reference to a Kubernetes `Secret` in the same namespace as the
-                      `Kafka` CR. Its `data.<key>` value is the broker's master HMAC key for
-                      KIP-48 delegation tokens.
+                    description: "Reference to a Kubernetes `Secret` in the same namespace as the\n`Kafka` CR. Its `data.<key>` value is the broker's master HMAC key for\nKIP-48 delegation tokens."
                     properties:
                       key:
                         description: Key within the Secret's `data`. Defaults to `secret-key`.
@@ -655,17 +611,11 @@ spec:
                 - secretKeyRef
                 type: object
               interBrokerKerberos:
-                description: |-
-                  Inter-broker Kerberos initiate config. It is required when
-                  `interBrokerListenerName` resolves to a `type: gssapi` listener. It
-                  supplies the shared client principal and the KDC. The keytab comes from
-                  that listener's `keytabSecretRef`.
+                description: "Inter-broker Kerberos initiate config. It is required when\n`interBrokerListenerName` resolves to a `type: gssapi` listener. It\nsupplies the shared client principal and the KDC. The keytab comes from\nthat listener's `keytabSecretRef`."
                 nullable: true
                 properties:
                   clientPrincipal:
-                    description: |-
-                      Principal that every broker authenticates as when it dials peers, for
-                      example `kafka@EXAMPLE.COM`. It must exist in the shared keytab.
+                    description: "Principal that every broker authenticates as when it dials peers, for\nexample `kafka@EXAMPLE.COM`. It must exist in the shared keytab."
                     type: string
                   kdcUrl:
                     description: KDC endpoint, for example `tcp://kdc:88`.
@@ -679,22 +629,14 @@ spec:
                 - kdcUrl
                 type: object
               interBrokerListenerName:
-                description: |-
-                  Name of the listener for inter-broker traffic. When `None`, the
-                  operator picks the first `internal` listener. When `listeners` is
-                  empty, the operator picks the synthesized default `"PLAIN"`.
+                description: "Name of the listener for inter-broker traffic. When `None`, the\noperator picks the first `internal` listener. When `listeners` is\nempty, the operator picks the synthesized default `\"PLAIN\"`."
                 nullable: true
                 type: string
               kafkaVersion:
-                description: |-
-                  Krabka version label. The operator propagates it to all pool pods
-                  through the `app.kubernetes.io/version` label.
+                description: "Krabka version label. The operator propagates it to all pool pods\nthrough the `app.kubernetes.io/version` label."
                 type: string
               krb5ConfSecretRef:
-                description: |-
-                  Optional process-wide `krb5.conf`. The operator mounts it into the
-                  broker pods and points `KRB5_CONFIG` at it. It serves both the accept
-                  path and the initiate path.
+                description: "Optional process-wide `krb5.conf`. The operator mounts it into the\nbroker pods and points `KRB5_CONFIG` at it. It serves both the accept\npath and the initiate path."
                 nullable: true
                 properties:
                   key:
@@ -708,17 +650,11 @@ spec:
                 - secretName
                 type: object
               listeners:
-                description: |-
-                  Named listeners. An empty or absent list synthesizes one internal
-                  `PLAIN` listener on port 9092.
+                description: "Named listeners. An empty or absent list synthesizes one internal\n`PLAIN` listener on port 9092."
                 items:
                   properties:
                     authentication:
-                      description: |-
-                        Per-listener authentication mechanism. Absent means anonymous, and no
-                        client identity is required. When the field is `type: tls`, the
-                        listener must also have `tls: true`. The reconcile enforces this
-                        rule.
+                      description: "Per-listener authentication mechanism. Absent means anonymous, and no\nclient identity is required. When the field is `type: tls`, the\nlistener must also have `tls: true`. The reconcile enforces this\nrule."
                       nullable: true
                       properties:
                         accessTokenIsJwt:
@@ -864,7 +800,7 @@ spec:
                               description: Annotations to add to the bootstrap Service.
                               type: object
                             host:
-                              description: '`ingress` / `route` only: bootstrap hostname.'
+                              description: "`ingress` / `route` only: bootstrap hostname."
                               nullable: true
                               type: string
                             labels:
@@ -873,11 +809,11 @@ spec:
                               description: Labels to add to the bootstrap Service.
                               type: object
                             loadBalancerIP:
-                              description: '`loadbalancer` only: pin the bootstrap LB IP.'
+                              description: "`loadbalancer` only: pin the bootstrap LB IP."
                               nullable: true
                               type: string
                             nodePort:
-                              description: '`nodeport` only: pin the bootstrap `NodePort`.'
+                              description: "`nodeport` only: pin the bootstrap `NodePort`."
                               format: int32
                               nullable: true
                               type: integer
@@ -899,15 +835,15 @@ spec:
                                 format: int32
                                 type: integer
                               host:
-                                description: '`ingress` / `route` only: per-broker hostname.'
+                                description: "`ingress` / `route` only: per-broker hostname."
                                 nullable: true
                                 type: string
                               loadBalancerIP:
-                                description: '`loadbalancer` only: pin this broker''s `Service.spec.loadBalancerIP`.'
+                                description: "`loadbalancer` only: pin this broker's `Service.spec.loadBalancerIP`."
                                 nullable: true
                                 type: string
                               nodePort:
-                                description: '`nodeport` only: pin this broker''s `Service.spec.ports[0].nodePort`.'
+                                description: "`nodeport` only: pin this broker's `Service.spec.ports[0].nodePort`."
                                 format: int32
                                 nullable: true
                                 type: integer
@@ -916,38 +852,17 @@ spec:
                             type: object
                           type: array
                         class:
-                          description: |-
-                            `ingress` only: the `spec.ingressClassName` that the operator sets on
-                            every generated `Ingress`. This is the Strimzi-shaped
-                            `configuration.class`. It is inert for other listener types.
+                          description: "`ingress` only: the `spec.ingressClassName` that the operator sets on\nevery generated `Ingress`. This is the Strimzi-shaped\n`configuration.class`. It is inert for other listener types."
                           nullable: true
                           type: string
                       type: object
                     name:
-                      description: |-
-                        Unique within the cluster. Alphanumeric characters and `-`, ≤25
-                        chars. It is the Kafka listener name, and it appears in
-                        `bootstrap.servers`-style URLs.
+                      description: "Unique within the cluster. Alphanumeric characters and `-`, ≤25\nchars. It is the Kafka listener name, and it appears in\n`bootstrap.servers`-style URLs."
                       type: string
                     networkPolicyPeers:
-                      description: |-
-                        Per-listener peer allow-list. It is tri-state:
-                        - `None` gives no per-listener restriction, that is, allow-all on this
-                          port.
-                        - `Some(vec![])` gives deny-all on this listener port. The operator
-                          emits no per-listener rule, and the default-deny applies.
-                        - `Some(non_empty)` lets only the listed peers reach this port.
-
-                        The operator reads this field only when `Kafka.spec.networkPolicy` is
-                        set. In any other case the field is inert. The operator auto-allow rule
-                        still fires on this port for deny-all listeners, so that the operator
-                        can manage the cluster.
+                      description: "Per-listener peer allow-list. It is tri-state:\n- `None` gives no per-listener restriction, that is, allow-all on this\n  port.\n- `Some(vec![])` gives deny-all on this listener port. The operator\n  emits no per-listener rule, and the default-deny applies.\n- `Some(non_empty)` lets only the listed peers reach this port.\n\nThe operator reads this field only when `Kafka.spec.networkPolicy` is\nset. In any other case the field is inert. The operator auto-allow rule\nstill fires on this port for deny-all listeners, so that the operator\ncan manage the cluster."
                       items:
-                        description: |-
-                          Subset of `networking.k8s.io/v1.NetworkPolicyPeer`.
-
-                          This struct omits `ipBlock` on purpose. Someone can add it later if
-                          external CIDR allow-lists become a real need.
+                        description: "Subset of `networking.k8s.io/v1.NetworkPolicyPeer`.\n\nThis struct omits `ipBlock` on purpose. Someone can add it later if\nexternal CIDR allow-lists become a real need."
                         properties:
                           namespaceSelector:
                             description: A label selector is a label query over a set of resources. The result of matchLabels and matchExpressions are ANDed. An empty label selector matches all objects. A null label selector matches no objects.
@@ -1020,17 +935,10 @@ spec:
                       type: integer
                     tls:
                       default: false
-                      description: |-
-                        Transport-level TLS. When `true`, the listener uses the per-broker
-                        keystore that the cluster CA signed, and clients must use TLS to
-                        connect. This field is independent of `authentication`. A `tls: true`
-                        listener with no `authentication` is anonymous over TLS.
+                      description: "Transport-level TLS. When `true`, the listener uses the per-broker\nkeystore that the cluster CA signed, and clients must use TLS to\nconnect. This field is independent of `authentication`. A `tls: true`\nlistener with no `authentication` is anonymous over TLS."
                       type: boolean
                     type:
-                      description: |-
-                        Listener type. `internal` is in-cluster. `nodeport` and
-                        `loadbalancer` create external Services. The schema accepts `ingress`
-                        and `route`, but the reconcile rejects them.
+                      description: "Listener type. `internal` is in-cluster. `nodeport` and\n`loadbalancer` create external Services. The schema accepts `ingress`\nand `route`, but the reconcile rejects them."
                       enum:
                       - internal
                       - nodeport
@@ -1045,25 +953,13 @@ spec:
                   type: object
                 type: array
               logging:
-                description: |-
-                  Broker log configuration. When `None`, the brokers use their built-in
-                  default `RUST_LOG` filter. When `Some`, the operator composes an inline
-                  `tracing` env-filter string, or reads an external one. The operator
-                  then renders it into the broker `ConfigMap` under the `rust.log` key,
-                  wires it into the `RUST_LOG` env of each broker pod, and rolls the
-                  cluster on a change through the config hash.
+                description: "Broker log configuration. When `None`, the brokers use their built-in\ndefault `RUST_LOG` filter. When `Some`, the operator composes an inline\n`tracing` env-filter string, or reads an external one. The operator\nthen renders it into the broker `ConfigMap` under the `rust.log` key,\nwires it into the `RUST_LOG` env of each broker pod, and rolls the\ncluster on a change through the config hash."
                 nullable: true
                 properties:
                   loggers:
                     additionalProperties:
                       type: string
-                    description: |-
-                      Inline loggers, from tracing target to level. The key `root` is
-                      case-insensitive and sets the global default level as a bare
-                      env-filter directive. Any other key is a tracing target, that is, a
-                      Rust module path such as `krabka_broker`. The levels are
-                      `trace|debug|info|warn|error|off`, and they are case-insensitive.
-                      `fatal` is accepted as an alias for `error`.
+                    description: "Inline loggers, from tracing target to level. The key `root` is\ncase-insensitive and sets the global default level as a bare\nenv-filter directive. Any other key is a tracing target, that is, a\nRust module path such as `krabka_broker`. The levels are\n`trace|debug|info|warn|error|off`, and they are case-insensitive.\n`fatal` is accepted as an alias for `error`."
                     type: object
                   type:
                     default: inline
@@ -1072,10 +968,7 @@ spec:
                     - external
                     type: string
                   valueFrom:
-                    description: |-
-                      External logging source. This field is required when
-                      `type: external`. The operator uses the value of the referenced
-                      `ConfigMap` key verbatim as the broker's `RUST_LOG` filter.
+                    description: "External logging source. This field is required when\n`type: external`. The operator uses the value of the referenced\n`ConfigMap` key verbatim as the broker's `RUST_LOG` filter."
                     nullable: true
                     properties:
                       configMapKeyRef:
@@ -1093,24 +986,11 @@ spec:
                     type: object
                 type: object
               metadataVersion:
-                description: |-
-                  `KRaft` metadata version, the runtime analog of
-                  `inter.broker.protocol.version`. When unset, it tracks the
-                  `major.minor` of `kafkaVersion`. When set, it pins the metadata version
-                  for a two-step upgrade or an online downgrade. The operator validates
-                  it against `kafkaVersion`; changes on an existing cluster are finalized
-                  through `UpdateFeatures`, with safe-downgrade semantics for a lower
-                  target. Rejections surface `KafkaVersionValid=False` and leave
-                  `status.metadataVersion` unchanged.
+                description: "`KRaft` metadata version, the runtime analog of\n`inter.broker.protocol.version`. When unset, it tracks the\n`major.minor` of `kafkaVersion`. When set, it pins the metadata version\nfor a two-step upgrade or an online downgrade. The operator validates\nit against `kafkaVersion`; changes on an existing cluster are finalized\nthrough `UpdateFeatures`, with safe-downgrade semantics for a lower\ntarget. Rejections surface `KafkaVersionValid=False` and leave\n`status.metadataVersion` unchanged."
                 nullable: true
                 type: string
               metricsConfig:
-                description: |-
-                  Prometheus scrape configuration. When `None`, the brokers do not bind
-                  `/metrics`, and the operator renders no `PodMonitor` and no
-                  `ServiceMonitor`. When `Some`, the broker `StatefulSet` gains a
-                  `metrics` container port on TCP 9404, and the operator SSA-applies the
-                  resources that `pod_monitor` and `service_monitor` request.
+                description: "Prometheus scrape configuration. When `None`, the brokers do not bind\n`/metrics`, and the operator renders no `PodMonitor` and no\n`ServiceMonitor`. When `Some`, the broker `StatefulSet` gains a\n`metrics` container port on TCP 9404, and the operator SSA-applies the\nresources that `pod_monitor` and `service_monitor` request."
                 nullable: true
                 properties:
                   podMonitor:
@@ -1148,52 +1028,25 @@ spec:
                     type: string
                 type: object
               networkPolicy:
-                description: |-
-                  Opt-in `NetworkPolicy` generation. When `None`, the operator generates
-                  no `NetworkPolicy`. When `Some`, even `{}`, the operator renders a
-                  cluster-level `NetworkPolicy` that gates ingress to the broker and
-                  controller pods.
+                description: "Opt-in `NetworkPolicy` generation. When `None`, the operator generates\nno `NetworkPolicy`. When `Some`, even `{}`, the operator renders a\ncluster-level `NetworkPolicy` that gates ingress to the broker and\ncontroller pods."
                 nullable: true
                 type: object
               tieredStorage:
-                description: |-
-                  KIP-405: cluster-wide tiered storage. When `Some`, every broker pod
-                  boots with the local-tier RSM enabled, with an `emptyDir` mounted at
-                  `/var/lib/krabka/remote`, which is the broker's
-                  `remote_log_storage_dir`, and with `[remote_storage]` rendered in the
-                  broker TOML. The per-topic enablement does not change. It stays
-                  `KafkaTopic.spec.config["remote.storage.enable"] = "true"`.
-
-                  With the `emptyDir` default and `InmemoryRemoteLogMetadataManager` as
-                  the only RLMM, tier data does not survive pod restarts. PVC support
-                  pairs with the production RLMM.
+                description: "KIP-405: cluster-wide tiered storage. When `Some`, every broker pod\nboots with the local-tier RSM enabled, with an `emptyDir` mounted at\n`/var/lib/krabka/remote`, which is the broker's\n`remote_log_storage_dir`, and with `[remote_storage]` rendered in the\nbroker TOML. The per-topic enablement does not change. It stays\n`KafkaTopic.spec.config[\"remote.storage.enable\"] = \"true\"`.\n\nWith the `emptyDir` default and `InmemoryRemoteLogMetadataManager` as\nthe only RLMM, tier data does not survive pod restarts. PVC support\npairs with the production RLMM."
                 nullable: true
                 properties:
                   gcs:
-                    description: |-
-                      GCS-backend tuning. It is required when `kind == Gcs`, and it must be
-                      absent in any other case. The struct has the same shape as
-                      `krabka_remote_storage::GcsConfig`. The operator renders the
-                      non-credential fields verbatim into the broker TOML's
-                      `[remote_storage.gcs]` block. S3 uses env-var credentials, but GCS does
-                      not. The operator mounts an explicit service-account JSON key as a FILE
-                      on the broker pod and gives it to the broker as `service_account_path`
-                      in the TOML. Unset credentials select keyless Workload Identity or
-                      ADC.
+                    description: "GCS-backend tuning. It is required when `kind == Gcs`, and it must be\nabsent in any other case. The struct has the same shape as\n`krabka_remote_storage::GcsConfig`. The operator renders the\nnon-credential fields verbatim into the broker TOML's\n`[remote_storage.gcs]` block. S3 uses env-var credentials, but GCS does\nnot. The operator mounts an explicit service-account JSON key as a FILE\non the broker pod and gives it to the broker as `service_account_path`\nin the TOML. Unset credentials select keyless Workload Identity or\nADC."
                     nullable: true
                     properties:
                       allowHttp:
-                        description: |-
-                          Allow plaintext HTTP. It is off by default. Turn it on for GCS
-                          emulators that run without TLS. Real GCS never needs it.
+                        description: "Allow plaintext HTTP. It is off by default. Turn it on for GCS\nemulators that run without TLS. Real GCS never needs it."
                         type: boolean
                       bucket:
                         description: GCS bucket name. Required.
                         type: string
                       credentials:
-                        description: |-
-                          Optional explicit service-account credentials. When None, the broker
-                          uses Workload Identity or ADC, which is the keyless GKE path.
+                        description: "Optional explicit service-account credentials. When None, the broker\nuses Workload Identity or ADC, which is the keyless GKE path."
                         nullable: true
                         properties:
                           serviceAccountKey:
@@ -1213,66 +1066,38 @@ spec:
                         - serviceAccountKey
                         type: object
                       endpoint:
-                        description: |-
-                          Optional custom GCS API base URL, for example for emulators and
-                          fakes. When `None`, the broker uses the standard Google Cloud Storage
-                          endpoint.
+                        description: "Optional custom GCS API base URL, for example for emulators and\nfakes. When `None`, the broker uses the standard Google Cloud Storage\nendpoint."
                         nullable: true
                         type: string
                       multipartChunkSize:
-                        description: |-
-                          Override the per-part size for multipart uploads in bytes. When unset,
-                          the broker uses
-                          `krabka_remote_storage::DEFAULT_MULTIPART_CHUNK_SIZE`, which is
-                          16 MiB.
+                        description: "Override the per-part size for multipart uploads in bytes. When unset,\nthe broker uses\n`krabka_remote_storage::DEFAULT_MULTIPART_CHUNK_SIZE`, which is\n16 MiB."
                         format: uint64
                         minimum: 0.0
                         nullable: true
                         type: integer
                       multipartThreshold:
-                        description: |-
-                          Override the single-PUT and multipart cutoff in bytes. When unset, the
-                          broker uses `krabka_remote_storage::DEFAULT_MULTIPART_THRESHOLD`, which
-                          is 100 MiB. Lower it in tests to exercise the multipart path on small
-                          fixtures.
+                        description: "Override the single-PUT and multipart cutoff in bytes. When unset, the\nbroker uses `krabka_remote_storage::DEFAULT_MULTIPART_THRESHOLD`, which\nis 100 MiB. Lower it in tests to exercise the multipart path on small\nfixtures."
                         format: uint64
                         minimum: 0.0
                         nullable: true
                         type: integer
                       prefix:
-                        description: |-
-                          Optional key prefix inside the bucket. It lets more than one Krabka
-                          cluster share a bucket without a collision.
+                        description: "Optional key prefix inside the bucket. It lets more than one Krabka\ncluster share a bucket without a collision."
                         nullable: true
                         type: string
                     required:
                     - bucket
                     type: object
                   metadataManager:
-                    description: |-
-                      KIP-405: pick the `RemoteLogMetadataManager` that the broker pods run.
-                      When the field is absent, or when it is `type: Topic`, the broker
-                      activates the durable
-                      `krabka_remote_storage_topic::TopicBasedRemoteLogMetadataManager`
-                      against the internal `__remote_log_metadata` topic. Tier-segment
-                      metadata then survives pod restarts and is consistent across the
-                      brokers in the cluster. Only an explicit `type: InMemory` selects the
-                      in-memory fixture, which is for test and dev only.
+                    description: "KIP-405: pick the `RemoteLogMetadataManager` that the broker pods run.\nWhen the field is absent, or when it is `type: Topic`, the broker\nactivates the durable\n`krabka_remote_storage_topic::TopicBasedRemoteLogMetadataManager`\nagainst the internal `__remote_log_metadata` topic. Tier-segment\nmetadata then survives pod restarts and is consistent across the\nbrokers in the cluster. Only an explicit `type: InMemory` selects the\nin-memory fixture, which is for test and dev only."
                     nullable: true
                     properties:
                       topic:
-                        description: |-
-                          Topic-backed tuning. It is optional when `kind == Topic`, and the
-                          broker fills the defaults for the bootstrap and topic parameters. It
-                          must be absent in any other case.
+                        description: "Topic-backed tuning. It is optional when `kind == Topic`, and the\nbroker fills the defaults for the bootstrap and topic parameters. It\nmust be absent in any other case."
                         nullable: true
                         properties:
                           bootstrap:
-                            description: |-
-                              `host:port` that the broker pod dials to reach its own listener, so
-                              that it can publish and consume `__remote_log_metadata`. This is
-                              usually the pod's loopback inter-broker listener, for example
-                              `127.0.0.1:9094`.
+                            description: "`host:port` that the broker pod dials to reach its own listener, so\nthat it can publish and consume `__remote_log_metadata`. This is\nusually the pod's loopback inter-broker listener, for example\n`127.0.0.1:9094`."
                             type: string
                           eventQueueCapacity:
                             description: Capacity of the shared metadata-event delivery queue.
@@ -1293,18 +1118,12 @@ spec:
                             nullable: true
                             type: string
                           numPartitions:
-                            description: |-
-                              Partition count for `__remote_log_metadata` on the first creation.
-                              Defaults to 50, which is the Kafka
-                              `remote.log.metadata.topic.num.partitions`.
+                            description: "Partition count for `__remote_log_metadata` on the first creation.\nDefaults to 50, which is the Kafka\n`remote.log.metadata.topic.num.partitions`."
                             format: int32
                             nullable: true
                             type: integer
                           replication:
-                            description: |-
-                              Replication factor for `__remote_log_metadata` on the first creation.
-                              Defaults to 3, which is the Kafka
-                              `remote.log.metadata.topic.replication.factor`.
+                            description: "Replication factor for `__remote_log_metadata` on the first creation.\nDefaults to 3, which is the Kafka\n`remote.log.metadata.topic.replication.factor`."
                             format: int32
                             nullable: true
                             type: integer
@@ -1329,14 +1148,7 @@ spec:
                     - type
                     type: object
                   persistence:
-                    description: |-
-                      KIP-405: durable storage for the local-tier directory. It is valid
-                      only with `type=Local`. When it is absent, which is the default, the
-                      operator renders an `emptyDir` for `tier-storage`. When `Some`, the
-                      operator renders a `volumeClaimTemplate` of the configured size and
-                      class, so tier data survives pod restarts. Together with the
-                      topic-backed RLMM, this closes the "tier data is lost on pod restart"
-                      caveat.
+                    description: "KIP-405: durable storage for the local-tier directory. It is valid\nonly with `type=Local`. When it is absent, which is the default, the\noperator renders an `emptyDir` for `tier-storage`. When `Some`, the\noperator renders a `volumeClaimTemplate` of the configured size and\nclass, so tier data survives pod restarts. Together with the\ntopic-backed RLMM, this closes the \"tier data is lost on pod restart\"\ncaveat."
                     nullable: true
                     properties:
                       class:
@@ -1345,48 +1157,26 @@ spec:
                         type: string
                       deleteClaim:
                         default: false
-                        description: |-
-                          `true` gives
-                          `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete`. It must
-                          match the parent `KafkaNodePool.spec.storage.deleteClaim` when both
-                          PVCs are present, because K8s `StatefulSets` have one set-wide
-                          retention policy and no per-template override. The operator validates
-                          this at reconcile time, and a mismatch surfaces as
-                          `TieredStorageInvalid`.
+                        description: "`true` gives\n`persistentVolumeClaimRetentionPolicy.whenDeleted: Delete`. It must\nmatch the parent `KafkaNodePool.spec.storage.deleteClaim` when both\nPVCs are present, because K8s `StatefulSets` have one set-wide\nretention policy and no per-template override. The operator validates\nthis at reconcile time, and a mismatch surfaces as\n`TieredStorageInvalid`."
                         type: boolean
                       size:
-                        description: |-
-                          K8s `Quantity`, for example `"50Gi"` or `"500Mi"`. It must be
-                          non-empty. The Kubernetes API server validates the resource-quantity
-                          form at SSA time.
+                        description: "K8s `Quantity`, for example `\"50Gi\"` or `\"500Mi\"`. It must be\nnon-empty. The Kubernetes API server validates the resource-quantity\nform at SSA time."
                         type: string
                     required:
                     - size
                     type: object
                   s3:
-                    description: |-
-                      S3-backend tuning. It is required when `kind == S3`, and it must be
-                      absent in any other case. The struct has the same shape as
-                      `krabka_remote_storage::S3Config`. The operator renders the
-                      non-credential fields verbatim into the broker TOML's
-                      `[remote_storage.s3]` block. The credentials come from Kubernetes
-                      Secrets, and the operator injects them as the broker-pod env vars
-                      `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+                    description: "S3-backend tuning. It is required when `kind == S3`, and it must be\nabsent in any other case. The struct has the same shape as\n`krabka_remote_storage::S3Config`. The operator renders the\nnon-credential fields verbatim into the broker TOML's\n`[remote_storage.s3]` block. The credentials come from Kubernetes\nSecrets, and the operator injects them as the broker-pod env vars\n`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`."
                     nullable: true
                     properties:
                       allowHttp:
-                        description: |-
-                          Allow plaintext HTTP. It is off by default. Turn it on for a `MinIO`
-                          that runs without TLS. AWS S3 never needs it.
+                        description: "Allow plaintext HTTP. It is off by default. Turn it on for a `MinIO`\nthat runs without TLS. AWS S3 never needs it."
                         type: boolean
                       bucket:
                         description: S3 bucket name. Required.
                         type: string
                       credentials:
-                        description: |-
-                          Optional explicit credentials. When `None`, the broker falls back to
-                          the AWS credential chain, such as IRSA on EKS or an instance profile on
-                          EC2.
+                        description: "Optional explicit credentials. When `None`, the broker falls back to\nthe AWS credential chain, such as IRSA on EKS or an instance profile on\nEC2."
                         nullable: true
                         properties:
                           accessKeyId:
@@ -1420,44 +1210,27 @@ spec:
                         - secretAccessKey
                         type: object
                       endpoint:
-                        description: |-
-                          Optional custom endpoint URL, for example `http://minio:9000` for
-                          `MinIO`, or `https://<account>.r2.cloudflarestorage.com` for Cloudflare
-                          R2. When `None`, the broker uses the AWS S3 endpoint for the configured
-                          region.
+                        description: "Optional custom endpoint URL, for example `http://minio:9000` for\n`MinIO`, or `https://<account>.r2.cloudflarestorage.com` for Cloudflare\nR2. When `None`, the broker uses the AWS S3 endpoint for the configured\nregion."
                         nullable: true
                         type: string
                       multipartChunkSize:
-                        description: |-
-                          Override the per-part size for multipart uploads in bytes. When unset,
-                          the broker uses
-                          `krabka_remote_storage::DEFAULT_MULTIPART_CHUNK_SIZE`, which is
-                          16 MiB.
+                        description: "Override the per-part size for multipart uploads in bytes. When unset,\nthe broker uses\n`krabka_remote_storage::DEFAULT_MULTIPART_CHUNK_SIZE`, which is\n16 MiB."
                         format: uint64
                         minimum: 0.0
                         nullable: true
                         type: integer
                       multipartThreshold:
-                        description: |-
-                          Override the single-PUT and multipart cutoff in bytes. When unset, the
-                          broker uses `krabka_remote_storage::DEFAULT_MULTIPART_THRESHOLD`, which
-                          is 100 MiB. Lower it in tests to exercise the multipart path on small
-                          fixtures.
+                        description: "Override the single-PUT and multipart cutoff in bytes. When unset, the\nbroker uses `krabka_remote_storage::DEFAULT_MULTIPART_THRESHOLD`, which\nis 100 MiB. Lower it in tests to exercise the multipart path on small\nfixtures."
                         format: uint64
                         minimum: 0.0
                         nullable: true
                         type: integer
                       prefix:
-                        description: |-
-                          Optional key prefix inside the bucket. It lets more than one Krabka
-                          cluster share a bucket without a collision.
+                        description: "Optional key prefix inside the bucket. It lets more than one Krabka\ncluster share a bucket without a collision."
                         nullable: true
                         type: string
                       region:
-                        description: |-
-                          AWS region. It is required even for the non-AWS endpoints `MinIO` and
-                          R2, because the `AmazonS3Builder` of `object_store` rejects an empty
-                          region.
+                        description: "AWS region. It is required even for the non-AWS endpoints `MinIO` and\nR2, because the `AmazonS3Builder` of `object_store` rejects an empty\nregion."
                         type: string
                     required:
                     - bucket
@@ -1474,13 +1247,7 @@ spec:
                 - type
                 type: object
               tracing:
-                description: |-
-                  Distributed-tracing wiring for the broker pods. When `Some`, the
-                  operator renders the matching `KRABKA_OTLP_*` env vars onto every
-                  broker pod. The broker's telemetry pipeline reads them with
-                  `TelemetryConfig::from_env` and installs the OTLP tracer at startup.
-                  When `None`, the operator emits no OTLP env vars, and the broker leaves
-                  tracing off. That is the default.
+                description: "Distributed-tracing wiring for the broker pods. When `Some`, the\noperator renders the matching `KRABKA_OTLP_*` env vars onto every\nbroker pod. The broker's telemetry pipeline reads them with\n`TelemetryConfig::from_env` and installs the OTLP tracer at startup.\nWhen `None`, the operator emits no OTLP env vars, and the broker leaves\ntracing off. That is the default."
                 nullable: true
                 properties:
                   otlp:
@@ -1488,41 +1255,26 @@ spec:
                     nullable: true
                     properties:
                       endpoint:
-                        description: |-
-                          Required. OTLP collector endpoint in the form `scheme://host:port`.
-                          The operator renders it as `KRABKA_OTLP_ENDPOINT`. A set field also
-                          sets `KRABKA_OTLP_ENABLED=true`.
+                        description: "Required. OTLP collector endpoint in the form `scheme://host:port`.\nThe operator renders it as `KRABKA_OTLP_ENDPOINT`. A set field also\nsets `KRABKA_OTLP_ENABLED=true`."
                         type: string
                       protocol:
-                        description: |-
-                          OTLP wire protocol selector. It has the same shape as the broker's
-                          internal `OtlpProtocol` enum and the `OTEL_EXPORTER_OTLP_PROTOCOL` spec
-                          values.
+                        description: "OTLP wire protocol selector. It has the same shape as the broker's\ninternal `OtlpProtocol` enum and the `OTEL_EXPORTER_OTLP_PROTOCOL` spec\nvalues."
                         enum:
                         - grpc
                         - http_protobuf
                         nullable: true
                         type: string
                       sampleRatio:
-                        description: |-
-                          Optional sampling ratio in `[0.0, 1.0]`. The operator renders it as
-                          `KRABKA_OTLP_SAMPLE_RATIO`. An unset field leaves the binary's own
-                          default of `1.0`, which samples every trace.
+                        description: "Optional sampling ratio in `[0.0, 1.0]`. The operator renders it as\n`KRABKA_OTLP_SAMPLE_RATIO`. An unset field leaves the binary's own\ndefault of `1.0`, which samples every trace."
                         format: double
                         nullable: true
                         type: number
                       serviceName:
-                        description: |-
-                          Optional `service.name` resource attribute. The operator renders it as
-                          `OTEL_SERVICE_NAME`. An unset field leaves the binary's own name, which
-                          is `"krabka-broker"` for `Kafka` and `"krabka-gres"` for `Gres`.
+                        description: "Optional `service.name` resource attribute. The operator renders it as\n`OTEL_SERVICE_NAME`. An unset field leaves the binary's own name, which\nis `\"krabka-broker\"` for `Kafka` and `\"krabka-gres\"` for `Gres`."
                         nullable: true
                         type: string
                       timeout:
-                        description: |-
-                          Optional export timeout. The operator renders it as
-                          `KRABKA_OTLP_TIMEOUT`. An unset field leaves the binary's own default
-                          of `10s`.
+                        description: "Optional export timeout. The operator renders it as\n`KRABKA_OTLP_TIMEOUT`. An unset field leaves the binary's own default\nof `10s`."
                         nullable: true
                         type: string
                     required:
@@ -1543,42 +1295,29 @@ spec:
             nullable: true
             properties:
               clientsCa:
-                description: |-
-                  Status surface for one CA.
-
-                  The reconciler fills it in from the parsed CA cert and the CRD spec.
+                description: "Status surface for one CA.\n\nThe reconciler fills it in from the parsed CA cert and the CRD spec."
                 nullable: true
                 properties:
                   certGeneration:
                     default: 0
-                    description: |-
-                      Monotonic generation of the active signing cert. It increments on
-                      a same-key renewal and on a key promotion.
+                    description: "Monotonic generation of the active signing cert. It increments on\na same-key renewal and on a key promotion."
                     format: uint64
                     minimum: 0.0
                     type: integer
                   generated:
-                    description: |-
-                      `true` when the operator generated this CA, that is, when
-                      `generateCertificateAuthority == true`. `false` for a BYO CA.
+                    description: "`true` when the operator generated this CA, that is, when\n`generateCertificateAuthority == true`. `false` for a BYO CA."
                     type: boolean
                   keyGeneration:
                     default: 0
-                    description: |-
-                      Monotonic generation of the active signing key. It increments only
-                      on a key replacement.
+                    description: "Monotonic generation of the active signing key. It increments only\non a key replacement."
                     format: uint64
                     minimum: 0.0
                     type: integer
                   notAfter:
-                    description: |-
-                      RFC3339 `notAfter` of the current CA cert, which is the signing
-                      cert.
+                    description: "RFC3339 `notAfter` of the current CA cert, which is the signing\ncert."
                     type: string
                   rotationPhase:
-                    description: |-
-                      Staged key-replacement phase. One of `idle`, `key-replace-trust`,
-                      and `key-replace-promote`.
+                    description: "Staged key-replacement phase. One of `idle`, `key-replace-trust`,\nand `key-replace-promote`."
                     nullable: true
                     type: string
                   trustAnchors:
@@ -1592,42 +1331,29 @@ spec:
                 - notAfter
                 type: object
               clusterCa:
-                description: |-
-                  Status surface for one CA.
-
-                  The reconciler fills it in from the parsed CA cert and the CRD spec.
+                description: "Status surface for one CA.\n\nThe reconciler fills it in from the parsed CA cert and the CRD spec."
                 nullable: true
                 properties:
                   certGeneration:
                     default: 0
-                    description: |-
-                      Monotonic generation of the active signing cert. It increments on
-                      a same-key renewal and on a key promotion.
+                    description: "Monotonic generation of the active signing cert. It increments on\na same-key renewal and on a key promotion."
                     format: uint64
                     minimum: 0.0
                     type: integer
                   generated:
-                    description: |-
-                      `true` when the operator generated this CA, that is, when
-                      `generateCertificateAuthority == true`. `false` for a BYO CA.
+                    description: "`true` when the operator generated this CA, that is, when\n`generateCertificateAuthority == true`. `false` for a BYO CA."
                     type: boolean
                   keyGeneration:
                     default: 0
-                    description: |-
-                      Monotonic generation of the active signing key. It increments only
-                      on a key replacement.
+                    description: "Monotonic generation of the active signing key. It increments only\non a key replacement."
                     format: uint64
                     minimum: 0.0
                     type: integer
                   notAfter:
-                    description: |-
-                      RFC3339 `notAfter` of the current CA cert, which is the signing
-                      cert.
+                    description: "RFC3339 `notAfter` of the current CA cert, which is the signing\ncert."
                     type: string
                   rotationPhase:
-                    description: |-
-                      Staged key-replacement phase. One of `idle`, `key-replace-trust`,
-                      and `key-replace-promote`.
+                    description: "Staged key-replacement phase. One of `idle`, `key-replace-trust`,\nand `key-replace-promote`."
                     nullable: true
                     type: string
                   trustAnchors:
@@ -1642,9 +1368,7 @@ spec:
                 type: object
               conditions:
                 default: []
-                description: |-
-                  Standard Kubernetes-style condition list. It shows `Ready`,
-                  `ListenersValid`, and `ListenersReady`.
+                description: "Standard Kubernetes-style condition list. It shows `Ready`,\n`ListenersValid`, and `ListenersReady`."
                 items:
                   properties:
                     lastTransitionTime:
@@ -1657,7 +1381,7 @@ spec:
                       description: CamelCase machine reason.
                       type: string
                     status:
-                      description: '`True`, `False`, or `Unknown`.'
+                      description: "`True`, `False`, or `Unknown`."
                       type: string
                     type:
                       description: For example, `Ready`.
@@ -1675,9 +1399,7 @@ spec:
                 nullable: true
                 type: string
               listeners:
-                description: |-
-                  Per-listener resolved addresses. The operator fills them in once
-                  `ListenersReady=True`.
+                description: "Per-listener resolved addresses. The operator fills them in once\n`ListenersReady=True`."
                 items:
                   properties:
                     addresses:
@@ -1695,7 +1417,7 @@ spec:
                         type: object
                       type: array
                     bootstrapServers:
-                      description: '`host:port` that clients put in `bootstrap.servers`.'
+                      description: "`host:port` that clients put in `bootstrap.servers`."
                       type: string
                     name:
                       type: string
@@ -1714,9 +1436,7 @@ spec:
                   type: object
                 type: array
               metadataVersion:
-                description: |-
-                  The operator-finalized metadata version. On an existing cluster it
-                  advances only after `UpdateFeatures` accepts the requested level.
+                description: "The operator-finalized metadata version. On an existing cluster it\nadvances only after `UpdateFeatures` accepts the requested level."
                 nullable: true
                 type: string
               readyReplicas:
@@ -1730,9 +1450,7 @@ spec:
                 nullable: true
                 type: integer
               targetMetadataVersion:
-                description: |-
-                  The metadata feature level requested by the current spec. This may be
-                  newer than `metadataVersion` while broker pools are rolling.
+                description: "The metadata feature level requested by the current spec. This may be\nnewer than `metadataVersion` while broker pools are rolling."
                 nullable: true
                 type: string
             type: object
