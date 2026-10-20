@@ -30,7 +30,11 @@ where
     let group = &crd.spec.group;
     let plural = &crd.spec.names.plural;
     let file = out_dir.join(format!("{group}_{plural}.yaml"));
-    let yaml = serde_yaml::to_string(&crd)?;
+    // Keep generated CRDs free of indentation-only lines in multiline descriptions.
+    let yaml = serde_yaml::to_string_with_options(
+        &crd,
+        serde_yaml::ser_options! { prefer_block_scalars: false },
+    )?;
     fs::write(&file, yaml)?;
     eprintln!("wrote {}", file.display());
     Ok(())
