@@ -7,8 +7,8 @@ image:
 # Default broker image used when a Kafka CR doesn't override it.
 brokerImage:
   repository: ghcr.io/krabka-io/krabka-broker
-  tag: "v1.0.7"
-  digest: "sha256:9d35b99f59db68761fe9db07b0de6878591e0448c1dd86b93fbd7a89355e9869" # v1.0.7; wins over tag
+  tag: "v1.0.8"
+  digest: "sha256:1d0dd0d4d721e47866eda23279c37aba11324db222ba8cd7f001554c32e7745f" # v1.0.8; wins over tag
   pullPolicy: IfNotPresent
 
 # Digest-pinned shell copied into distroless broker pods. Override with an
@@ -23,7 +23,7 @@ shellImage: busybox@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f
 # another release.
 gatewayImage: ""
 connectorImage: ""
-schemaRegistryImage: ""
+schemaRegistryImage: "ghcr.io/krabka-io/krabka-schema-registry@sha256:b1c6021b702cd17dcae9adad7877ac31d97ddc77cb37b37df1bb698fc1ddc92b"
 
 # Default images for operator-managed Gres compute and activator workloads.
 gresImage:
