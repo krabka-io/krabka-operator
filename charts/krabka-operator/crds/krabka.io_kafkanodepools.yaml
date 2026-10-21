@@ -647,6 +647,23 @@ spec:
                     description: The operator copies this to `PodSpec.nodeSelector`.
                     nullable: true
                     type: object
+                  seccompProfile:
+                    description: "Seccomp profile of the pods. When this field is absent, the pods use\n`RuntimeDefault`. Use `Localhost` to give the broker a profile file\nthat permits `io_uring`."
+                    nullable: true
+                    properties:
+                      localhostProfile:
+                        description: "Path of the profile file on the node, relative to the seccomp\ndirectory of the kubelet (`/var/lib/kubelet/seccomp` by default). Set\nit only when `type` is `Localhost`."
+                        nullable: true
+                        type: string
+                      type:
+                        description: "`RuntimeDefault` uses the default profile of the container runtime.\n`Localhost` uses the file that `localhostProfile` names."
+                        enum:
+                        - RuntimeDefault
+                        - Localhost
+                        type: string
+                    required:
+                    - type
+                    type: object
                   tolerations:
                     description: The operator copies this to `PodSpec.tolerations`.
                     items:

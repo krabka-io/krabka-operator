@@ -247,6 +247,37 @@ pub struct PodTemplate {
     /// The operator copies this to `PodSpec.nodeSelector`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_selector: Option<std::collections::BTreeMap<String, String>>,
+    /// Seccomp profile of the pods. When this field is absent, the pods use
+    /// `RuntimeDefault`. Use `Localhost` to give the broker a profile file
+    /// that permits `io_uring`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seccomp_profile: Option<SeccompProfile>,
+}
+
+/// Seccomp profile of the pods of a pool.
+///
+/// The shape is the same as `PodSecurityContext.seccompProfile`, but the
+/// type cannot be `Unconfined`. The operator copies it to the pod
+/// `securityContext`.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeccompProfile {
+    /// `RuntimeDefault` uses the default profile of the container runtime.
+    /// `Localhost` uses the file that `localhostProfile` names.
+    #[serde(rename = "type")]
+    pub profile_type: SeccompProfileType,
+    /// Path of the profile file on the node, relative to the seccomp
+    /// directory of the kubelet (`/var/lib/kubelet/seccomp` by default). Set
+    /// it only when `type` is `Localhost`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub localhost_profile: Option<String>,
+}
+
+/// The kind of seccomp profile.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub enum SeccompProfileType {
+    RuntimeDefault,
+    Localhost,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -432,6 +463,10 @@ mod tests {
                 m.insert("kubernetes.io/os".into(), "linux".into());
                 m
             }),
+            seccomp_profile: Some(SeccompProfile {
+                profile_type: SeccompProfileType::Localhost,
+                localhost_profile: Some("krabka/io-uring.json".into()),
+            }),
         };
         let pool = KafkaNodePool::new(
             "brokers",
@@ -449,11 +484,38 @@ mod tests {
         );
 
         let json = serde_json::to_string(&pool).unwrap();
-        for want in ["\"team\":\"platform\"", "\"dedicated\"", "\"nodeSelector\""] {
+        for want in [
+            "\"team\":\"platform\"",
+            "\"dedicated\"",
+            "\"nodeSelector\"",
+            r#""seccompProfile":{"type":"Localhost","localhostProfile":"krabka/io-uring.json"}"#,
+        ] {
             assert!(json.contains(want), "case {want:?}; got: {json}");
         }
         let back: KafkaNodePool = serde_json::from_str(&json).unwrap();
         assert!(back.spec == pool.spec);
+    }
+
+    #[test]
+    fn seccomp_profile_schema_and_parse_refuse_unconfined() {
+        let crd = serde_json::to_value(KafkaNodePool::crd()).expect("serialize CRD");
+        let profile = &crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
+            ["properties"]["template"]["properties"]["seccompProfile"];
+        assert!(
+            profile["properties"]["type"]["enum"]
+                == serde_json::json!(["RuntimeDefault", "Localhost"])
+        );
+        assert!(profile["required"] == serde_json::json!(["type"]));
+
+        let parsed: SeccompProfile = serde_json::from_str(r#"{"type":"RuntimeDefault"}"#).unwrap();
+        assert!(
+            parsed
+                == SeccompProfile {
+                    profile_type: SeccompProfileType::RuntimeDefault,
+                    localhost_profile: None,
+                }
+        );
+        assert!(serde_json::from_str::<SeccompProfile>(r#"{"type":"Unconfined"}"#).is_err());
     }
 
     #[test]

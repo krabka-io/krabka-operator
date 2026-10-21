@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+### <!-- 0 -->🚀 Features
+
+
+- Add `KafkaNodePool.spec.template.seccompProfile` to select `RuntimeDefault` (the default) or a `Localhost` profile, so that brokers can use io_uring. Document which runtime default profiles block io_uring, and point to the io_uring profile that krabka-broker ships
+
+
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
 
