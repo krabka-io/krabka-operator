@@ -24,7 +24,7 @@
 //! component release.
 
 /// Broker image of a `KafkaNodePool`, from krabka-io/krabka-broker.
-pub const BROKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-broker:v1.0.7";
+pub const BROKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-broker:v1.0.8";
 
 /// Worker image of a `KafkaConnector`, from krabka-io/krabka-connect.
 pub const CONNECT_WORKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-connect-worker:v0.4.1";
@@ -33,7 +33,7 @@ pub const CONNECT_WORKER_IMAGE: &str = "ghcr.io/krabka-io/krabka-connect-worker:
 pub const GATEWAY_IMAGE: &str = "ghcr.io/krabka-io/krabka-gateway:v0.5.0";
 
 /// Image of a `SchemaRegistry`, from krabka-io/krabka-schema-registry.
-pub const SCHEMA_REGISTRY_IMAGE: &str = "ghcr.io/krabka-io/krabka-schema-registry:0.4.1";
+pub const SCHEMA_REGISTRY_IMAGE: &str = "ghcr.io/krabka-io/krabka-schema-registry:0.4.3";
 
 #[cfg(test)]
 mod tests {
@@ -47,7 +47,7 @@ mod tests {
         // here. None of them may carry the operator version, because the
         // components release on their own.
         for (actual, expected) in [
-            (BROKER_IMAGE, "ghcr.io/krabka-io/krabka-broker:v1.0.7"),
+            (BROKER_IMAGE, "ghcr.io/krabka-io/krabka-broker:v1.0.8"),
             (
                 CONNECT_WORKER_IMAGE,
                 "ghcr.io/krabka-io/krabka-connect-worker:v0.4.1",
@@ -55,7 +55,7 @@ mod tests {
             (GATEWAY_IMAGE, "ghcr.io/krabka-io/krabka-gateway:v0.5.0"),
             (
                 SCHEMA_REGISTRY_IMAGE,
-                "ghcr.io/krabka-io/krabka-schema-registry:0.4.1",
+                "ghcr.io/krabka-io/krabka-schema-registry:0.4.3",
             ),
         ] {
             assert!(actual == expected);
