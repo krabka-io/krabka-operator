@@ -30,7 +30,7 @@ pub use kafka::{
 };
 pub use kafka_node_pool::{
     JbodSpec, JbodVolume, KafkaNodePool, KafkaNodePoolSpec, KafkaNodePoolStatus, MetadataTemplate,
-    NodeRole, PersistentClaimSpec, PodTemplate, Storage,
+    NodeRole, PersistentClaimSpec, PodTemplate, SeccompProfile, SeccompProfileType, Storage,
 };
 pub use listener::*;
 pub use logging::{ConfigMapKeyRef, ExternalLoggingSource, Logging, LoggingType};

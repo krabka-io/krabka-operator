@@ -1,0 +1,23 @@
+apiVersion: krabka.io/v1alpha1
+kind: KafkaNodePool
+metadata:
+  name: brokers
+  namespace: kafka
+  labels:
+    krabka.io/cluster: my-cluster
+spec:
+  roles: [Broker]
+  replicas: 3
+  nodeIdStart: 100
+  template:
+    # The profile must be on every node, at
+    # /var/lib/kubelet/seccomp/operator/krabka-io-uring.json. Use
+    # packaging/k8s/profiles/krabka-io-uring.json from krabka-broker. The
+    # Security Profiles Operator can install it. The operator does not write
+    # files on nodes.
+    seccompProfile:
+      type: Localhost
+      localhostProfile: operator/krabka-io-uring.json
+  storage:
+    type: PersistentClaim
+    size: 100Gi

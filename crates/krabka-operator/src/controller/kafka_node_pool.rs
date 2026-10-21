@@ -49,7 +49,7 @@ use crate::{
     crd::{
         JbodVolume, Kafka, KafkaCondition, KafkaNodePool, KafkaNodePoolStatus, KafkaRebalance,
         KafkaRebalanceMode, KafkaRebalanceSpec, NodeRole, RebalancerAuthorizationSecretRef,
-        Storage,
+        SeccompProfile, SeccompProfileType, Storage,
     },
 };
 
@@ -74,7 +74,7 @@ const REBALANCE_COMMAND_ANNOTATION: &str = "krabka.io/rebalance";
 /// distinct condition reason; the operator surfaces the variant as
 /// `Ready=False` and does not attempt further reconcile until the spec
 /// is corrected.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PoolValidationError {
     #[error("spec.roles must contain at least one role")]
     RolesEmpty,
@@ -136,6 +136,14 @@ pub enum PoolValidationError {
     JbodDuplicateVolumeId(i32),
     #[error("spec.storage.volumes is immutable after the StatefulSet is created")]
     JbodVolumesImmutable,
+    #[error("spec.template.seccompProfile.localhostProfile is required when type is Localhost")]
+    SeccompLocalhostProfileMissing,
+    #[error("spec.template.seccompProfile.localhostProfile is set, but type is RuntimeDefault")]
+    SeccompLocalhostProfileUnexpected,
+    #[error(
+        "spec.template.seccompProfile.localhostProfile={0:?} must be a relative path without `..`"
+    )]
+    SeccompLocalhostProfileInvalid(String),
 }
 
 /// Validate a `KafkaNodePool` spec against its invariants.
@@ -182,7 +190,40 @@ pub(crate) fn validate(pool: &KafkaNodePool) -> Result<(), PoolValidationError> 
         }
         None | Some(Storage::Ephemeral) => {}
     }
+    if let Some(profile) = pool
+        .spec
+        .template
+        .as_ref()
+        .and_then(|template| template.seccomp_profile.as_ref())
+    {
+        validate_seccomp_profile(profile)?;
+    }
     Ok(())
+}
+
+/// Check a seccomp profile with the rules that the API server applies to
+/// `PodSecurityContext.seccompProfile`. A bad profile then fails here, on
+/// the pool, and not later on the `StatefulSet`.
+fn validate_seccomp_profile(profile: &SeccompProfile) -> Result<(), PoolValidationError> {
+    match (profile.profile_type, profile.localhost_profile.as_deref()) {
+        (SeccompProfileType::RuntimeDefault, None) => Ok(()),
+        (SeccompProfileType::RuntimeDefault, Some(_)) => {
+            Err(PoolValidationError::SeccompLocalhostProfileUnexpected)
+        }
+        (SeccompProfileType::Localhost, None) => {
+            Err(PoolValidationError::SeccompLocalhostProfileMissing)
+        }
+        (SeccompProfileType::Localhost, Some(path)) => {
+            if path.is_empty() || path.starts_with('/') || path.split('/').any(|part| part == "..")
+            {
+                Err(PoolValidationError::SeccompLocalhostProfileInvalid(
+                    path.to_string(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
 }
 
 fn node_id_end(pool: &KafkaNodePool) -> Result<i32, PoolValidationError> {
@@ -1647,6 +1688,11 @@ fn render_statefulset_with_shell(
         {
             pod_spec["nodeSelector"] = serde_json::to_value(ns)?;
         }
+        // `validate` has checked the profile. RuntimeDefault renders the
+        // same JSON as the default above, so the pod template stays the same.
+        if let Some(profile) = tpl.seccomp_profile.as_ref() {
+            pod_spec["securityContext"]["seccompProfile"] = serde_json::to_value(profile)?;
+        }
     }
 
     let tier_storage_persistence = tiered_storage.and_then(|t| t.persistence.as_ref());
@@ -2029,6 +2075,11 @@ fn condition_for_validation_error(err: &PoolValidationError) -> KafkaCondition {
             "StorageImmutable",
             "spec.storage.volumes is immutable after the StatefulSet is created".to_string(),
         ),
+        PoolValidationError::SeccompLocalhostProfileMissing
+        | PoolValidationError::SeccompLocalhostProfileUnexpected
+        | PoolValidationError::SeccompLocalhostProfileInvalid(_) => {
+            ("SeccompProfileInvalid", err.to_string())
+        }
     };
     condition("Ready", "False", reason, &message)
 }
@@ -4180,6 +4231,110 @@ mod tests {
         check!(spec.affinity.is_none());
         check!(spec.tolerations.is_none() || spec.tolerations.as_ref().unwrap().is_empty());
         check!(spec.node_selector.is_none() || spec.node_selector.as_ref().unwrap().is_empty());
+    }
+
+    fn pool_with_seccomp(profile_type: SeccompProfileType, path: Option<&str>) -> KafkaNodePool {
+        pool_with_template(PodTemplate {
+            seccomp_profile: Some(SeccompProfile {
+                profile_type,
+                localhost_profile: path.map(str::to_string),
+            }),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn render_statefulset_seccomp_profile() {
+        use k8s_openapi::api::core::v1::SeccompProfile as PodSeccompProfile;
+
+        let parent = parent_fixture("demo");
+        let rendered = |pool: &KafkaNodePool| {
+            render_statefulset(&parent, pool, "img:1")
+                .unwrap()
+                .spec
+                .unwrap()
+                .template
+                .spec
+                .unwrap()
+        };
+        let runtime_default = Some(PodSeccompProfile {
+            type_: "RuntimeDefault".into(),
+            localhost_profile: None,
+        });
+
+        let default = rendered(&pool_fixture("brokers", "demo", 1));
+        assert!(default.security_context.as_ref().unwrap().seccomp_profile == runtime_default);
+
+        // An explicit RuntimeDefault renders the same pod as no template.
+        let explicit = rendered(&pool_with_seccomp(SeccompProfileType::RuntimeDefault, None));
+        assert!(explicit == default);
+
+        let localhost = rendered(&pool_with_seccomp(
+            SeccompProfileType::Localhost,
+            Some("krabka/io-uring.json"),
+        ));
+        assert!(
+            localhost.security_context.unwrap().seccomp_profile
+                == Some(PodSeccompProfile {
+                    type_: "Localhost".into(),
+                    localhost_profile: Some("krabka/io-uring.json".into()),
+                })
+        );
+    }
+
+    #[test]
+    fn validate_seccomp_profile_cases() {
+        use SeccompProfileType::{Localhost, RuntimeDefault};
+
+        for (profile_type, path) in [
+            (RuntimeDefault, None),
+            (Localhost, Some("krabka/io-uring.json")),
+            (Localhost, Some("operator/krabka/io-uring.json")),
+        ] {
+            check!(
+                validate(&pool_with_seccomp(profile_type, path)).is_ok(),
+                "case {profile_type:?} {path:?}"
+            );
+        }
+
+        for (profile_type, path, want) in [
+            (
+                RuntimeDefault,
+                Some("krabka/io-uring.json"),
+                PoolValidationError::SeccompLocalhostProfileUnexpected,
+            ),
+            (
+                Localhost,
+                None,
+                PoolValidationError::SeccompLocalhostProfileMissing,
+            ),
+            (
+                Localhost,
+                Some(""),
+                PoolValidationError::SeccompLocalhostProfileInvalid(String::new()),
+            ),
+            (
+                Localhost,
+                Some("/var/lib/kubelet/seccomp/io-uring.json"),
+                PoolValidationError::SeccompLocalhostProfileInvalid(
+                    "/var/lib/kubelet/seccomp/io-uring.json".into(),
+                ),
+            ),
+            (
+                Localhost,
+                Some("krabka/../../io-uring.json"),
+                PoolValidationError::SeccompLocalhostProfileInvalid(
+                    "krabka/../../io-uring.json".into(),
+                ),
+            ),
+        ] {
+            let err = validate(&pool_with_seccomp(profile_type, path)).unwrap_err();
+            check!(err == want, "case {profile_type:?} {path:?}");
+            check!(
+                condition_for_validation_error(&err).reason == "SeccompProfileInvalid",
+                "case {profile_type:?} {path:?}"
+            );
+        }
     }
 
     #[test]
