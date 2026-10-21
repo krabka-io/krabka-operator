@@ -105,6 +105,25 @@ containerSecurityContext:
   capabilities:
     drop: [ALL]
 
+# A seccomp profile for the broker pods that allows io_uring. The broker sends
+# the O_DIRECT writes of preallocate=true segments through io_uring. The
+# RuntimeDefault profiles of containerd 2.x and CRI-O refuse io_uring, and the
+# broker then uses its write threads. files/krabka-io-uring.json is
+# containerd v2.4.2's RuntimeDefault profile, for a container with no
+# capabilities, plus io_uring_setup, io_uring_enter and io_uring_register.
+#
+# This value only installs the profile on the nodes. The operator gives its
+# broker pods RuntimeDefault, and it has no setting yet that selects another
+# profile. The chart README tells the plan.
+brokerSeccompProfile:
+  securityProfilesOperator:
+    # Create a cluster-scoped SeccompProfile of the Security Profiles Operator
+    # (v1.0.0 or later, API security-profiles-operator.x-k8s.io/v1). That
+    # operator writes the file to operator/<name>.json under the kubelet
+    # seccomp directory of each node. Install that operator and its CRDs first.
+    enabled: false
+    name: krabka-io-uring
+
 caRenewal:
   enabled: true
   schedule: "0 2 * * *"

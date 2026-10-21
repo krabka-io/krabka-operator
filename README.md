@@ -38,7 +38,8 @@ a CRD type has to reach the manifests in the same commit.
 [`charts/krabka-operator`](charts/krabka-operator) installs the operator, its
 RBAC, and the CRDs. Helm creates the files in `crds/` on install. It does not
 touch them on upgrade, so a schema change needs a `kubectl apply` of that
-directory.
+directory. The [chart README](charts/krabka-operator/README.md) tells how to
+install a broker seccomp profile that allows io_uring.
 
 ## Seccomp profile and io_uring
 

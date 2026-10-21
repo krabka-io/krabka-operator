@@ -1,0 +1,20 @@
+{{- /*
+A Security Profiles Operator SeccompProfile that installs files/krabka-io-uring.json
+on every node. The SeccompProfile is cluster-scoped, and the node file is
+operator/<name>.json under the kubelet seccomp directory. See the chart README.
+*/ -}}
+{{- with .Values.brokerSeccompProfile.securityProfilesOperator -}}
+{{- if .enabled -}}
+apiVersion: security-profiles-operator.x-k8s.io/v1
+kind: SeccompProfile
+metadata:
+  name: {{ required "brokerSeccompProfile.securityProfilesOperator.name is required" .name }}
+  labels:
+    {{- include "krabka-operator.commonLabels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ include "krabka-operator.name" $ }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    app.kubernetes.io/component: broker-seccomp-profile
+spec:
+  {{- $.Files.Get "files/krabka-io-uring.json" | fromJson | toYaml | nindent 2 }}
+{{- end -}}
+{{- end -}}
