@@ -37,7 +37,14 @@ git_override(
 # the toolchain links with lld instead, makes a local build and a CI build the
 # same build, and is what rules_rs_mutants needs on macOS, where Xcode's
 # cc_wrapper leaves a mutant link without `DEVELOPER_DIR`.
-bazel_dep(name = "llvm", version = "0.8.18")
+#
+# Keep llvm-profdata on the same LLVM major as rustc (`rustc -vV`), so
+# coverage can merge the raw profiles. Rust 1.99 uses LLVM 23.
+bazel_dep(name = "llvm", version = "0.8.24")
+
+llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
+llvm.version(llvm_version = "23.1.2")
+use_repo(llvm, "llvm-project")
 
 register_toolchains("@llvm//toolchain:all")
 
