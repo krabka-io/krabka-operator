@@ -37,7 +37,14 @@ git_override(
 # the toolchain links with lld instead, makes a local build and a CI build the
 # same build, and is what rules_rs_mutants needs on macOS, where Xcode's
 # cc_wrapper leaves a mutant link without `DEVELOPER_DIR`.
-bazel_dep(name = "llvm", version = "0.8.18")
+#
+# Keep llvm-profdata on the same LLVM major as rustc (`rustc -vV`), so
+# coverage can merge the raw profiles. Rust 1.99 uses LLVM 23.
+bazel_dep(name = "llvm", version = "0.8.24")
+
+llvm = use_extension("@llvm//extensions:llvm.bzl", "llvm")
+llvm.version(llvm_version = "23.1.2")
+use_repo(llvm, "llvm-project")
 
 register_toolchains("@llvm//toolchain:all")
 
@@ -102,7 +109,7 @@ toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "too
 # Named rather than left as `default_rust_toolchains`, which
 # aspect_rules_lint_rust also claims: rules_rs refuses two configurations under
 # one repo name, and that module wants 1.92.0 / edition 2021 while this
-# repository is 1.98.1 / edition 2024. Both toolchains get registered; ours is
+# repository is 1.99.1 / edition 2024. Both toolchains get registered; ours is
 # registered from the root module, which is what makes it the one that resolves.
 toolchains.toolchain(
     name = "krabka_rust_toolchains",
@@ -117,7 +124,7 @@ toolchains.toolchain(
     # Matches rust-toolchain.toml. These had drifted apart -- Bazel built with
     # 1.97.0 while Cargo used 1.98.1 -- which is precisely the split the "one
     # dependency source of truth" arrangement exists to avoid.
-    version = "1.98.1",
+    version = "1.99.1",
 )
 use_repo(toolchains, "krabka_rust_toolchains")
 
@@ -187,6 +194,7 @@ SIBLING_MEMBERS = {
     "krabka-client-streams": "crates/client-streams",
     "krabka-compression": "crates/compression",
     "krabka-format": "crates/format",
+    "krabka-java-regex": "crates/java-regex",
     "krabka-ids": "crates/ids",
     "krabka-kafka-tap": "crates/kafka-tap",
     "krabka-kraft-core": "crates/kraft-core",
