@@ -107,9 +107,9 @@ dependencies = [
 
 [[package]]
 name = "annotate-snippets"
-version = "0.12.16"
+version = "0.12.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f211a51805bc641f3ad5b7664c77d2547af685cc33b4cd8d31964027a46f13f1"
+checksum = "b2a5b0a5ab8561c603f16c3b78c24a386b1f70e7fc1b1b1e8c15738828e4a176"
 dependencies = [
  "anstyle",
  "memchr",
@@ -223,9 +223,9 @@ dependencies = [
 
 [[package]]
 name = "arc-swap"
-version = "1.9.2"
+version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+checksum = "380962b3d93b99642e50b9febf72c071e97e8b32d86eae9cf4ef582bb960ae6e"
 dependencies = [
  "rustversion",
 ]
@@ -235,6 +235,12 @@ name = "arraydeque"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
+
+[[package]]
+name = "arrayvec"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "asn1-rs"
@@ -339,7 +345,7 @@ checksum = "4f8abc12baad266b1c8cec146854c195b5864b4221d4b2ca7296a7ae82d9e451"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -372,7 +378,7 @@ checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -389,9 +395,9 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.18.1"
+version = "1.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e"
+checksum = "faac5829c2b74c28f830747e7818ccfb684261b5f48a1118b1e2a13d36dfab13"
 dependencies = [
  "aws-lc-sys",
  "zeroize",
@@ -399,9 +405,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.45.0"
+version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27"
+checksum = "f1622d8446a2d4b2ce0c7eefc73dd43a99779028d5ee5c2dd8073a658ba8a2bc"
 dependencies = [
  "cc",
  "cmake",
@@ -594,25 +600,25 @@ dependencies = [
 
 [[package]]
 name = "bon"
-version = "3.10.2"
+version = "3.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "214f5df094ce551a10a30ffb9c70243d61f121a3d985a6495933e181dee6a7d2"
+checksum = "a05442cd7005532d0cfedec676b5b9333d2b4c7c3afabe2b1a9ce2742fbe2ee6"
 dependencies = [
  "bon-macros",
 ]
 
 [[package]]
 name = "bon-macros"
-version = "3.10.2"
+version = "3.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2706da6c749998cc555d04184909608956a69ad3f8ab1a076fbc867b4a3c3ce5"
+checksum = "93833e97ac7c46ba97045afcf247238c27057538fcf2f06344662ddd5f567be6"
 dependencies = [
  "darling 0.24.1",
  "ident_case",
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -662,9 +668,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.6.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f74872d07caf508b30a21f6836e7d7016a2eaf7d9ff4f48deaa58cd8a0407630"
+checksum = "86e055fa6e3e40ad6187ba25b6855eeb635d5271f8e0f0e1e9a5826b8d75bea0"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -749,7 +755,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -793,12 +799,138 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "combine"
-version = "4.6.8"
+version = "4.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfc320937d09e6de266b31b9afb480f197d7a861be86be7cb2ea7e5d1bfffc5e"
+checksum = "4356eba6976435498d05a311ee9fc486da3bc81c200d3f0d7dd9703b41913f92"
 dependencies = [
  "bytes",
  "memchr",
+]
+
+[[package]]
+name = "compio"
+version = "0.19.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c19d81c636b0f47aa50041d25b02d9d8289a3319727a8051209f71bea10e89d6"
+dependencies = [
+ "compio-buf",
+ "compio-driver",
+ "compio-log",
+ "compio-runtime",
+]
+
+[[package]]
+name = "compio-buf"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b51a2c35873865376ed4cdb6cfeb602b6cf569815f017ddd7bd8f86ad49b34c7"
+dependencies = [
+ "arrayvec",
+ "bytes",
+ "libc",
+]
+
+[[package]]
+name = "compio-driver"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "293e8086a35f52b5002402937cf4e69b5e414917e511c29c5e7ba2cebe6ef7b3"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg_aliases",
+ "compio-buf",
+ "compio-log",
+ "compio-send-wrapper",
+ "crossbeam-queue",
+ "flume",
+ "futures-util",
+ "io-uring",
+ "libc",
+ "linux-raw-sys",
+ "mod_use",
+ "once_cell",
+ "pastey",
+ "polling",
+ "rustix",
+ "smallvec",
+ "socket2",
+ "synchrony",
+ "thin-cell",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "compio-executor"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94961c5908b02bbb082e046968b8ee3d18995845a5c261376f0b0b5c95c87c2b"
+dependencies = [
+ "compio-log",
+ "compio-send-wrapper",
+ "crossbeam-queue",
+ "loom",
+ "slotmap",
+]
+
+[[package]]
+name = "compio-io"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3a354e085c4046dd8d2d9d514cf8c15c615eb8adf6c5f41dbf7899420457e9b"
+dependencies = [
+ "compio-buf",
+ "futures-util",
+ "pastey",
+ "pin-project-lite",
+ "synchrony",
+]
+
+[[package]]
+name = "compio-log"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dd867f29de59e4eff577dfeee3744cb0a264249f3faaf11945e8be79a3c3c62"
+dependencies = [
+ "tracing",
+]
+
+[[package]]
+name = "compio-runtime"
+version = "0.12.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20406f0a4e69cdd0c0a58c4a7cf51bcc965a543fb5da2fe931e970354e291ded"
+dependencies = [
+ "compio-buf",
+ "compio-driver",
+ "compio-executor",
+ "compio-io",
+ "compio-log",
+ "compio-send-wrapper",
+ "futures-util",
+ "libc",
+ "pin-project-lite",
+ "scoped-tls",
+ "synchrony",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "compio-send-wrapper"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa4a63ae089032966c7eb5411267dd14524fb249e6833818b2d6d9d9548bf504"
+dependencies = [
+ "cfg-if",
+ "loom",
+]
+
+[[package]]
+name = "concurrent-queue"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -879,47 +1011,47 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5"
 dependencies = [
  "digest 0.10.7",
- "spin",
-]
-
-[[package]]
-name = "crc32c"
-version = "0.6.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47"
-dependencies = [
- "rustc_version",
+ "spin 0.10.1",
 ]
 
 [[package]]
 name = "crc32fast"
-version = "1.5.2"
+version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01a7799fd6b852db0e61728dde9a204c423b44d689dbd432522543614b490e78"
+checksum = "0ba106e844045ddc02c20768ac4b0b7cb45f2cc2ecbd833ac9f5dacb183c2055"
 dependencies = [
  "cfg-if",
 ]
 
 [[package]]
 name = "creusot-std"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68cc8f3ec44f553652fecb0b534726b2ca5d4684a54a593f0aedfe766b3e76fd"
+checksum = "b019630da7e585ab18eff475d7ea820474c3fc0cd05a57706facf37f67ab2705"
 dependencies = [
  "creusot-std-proc",
 ]
 
 [[package]]
 name = "creusot-std-proc"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9530985d4aff8273851f018c36422944f70717d7aa9e0c724c3deab004bd6db"
+checksum = "5a21564d3da8f97ce00e03125d0c3f7c9faedfa68e5d182d88beb25c82c12d25"
 dependencies = [
  "pearlite-syn",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
  "uuid",
+]
+
+[[package]]
+name = "crossbeam-queue"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03e8bd762f7479489c70ed6c768ddca99d7296857de437a68dcb2a94365b3fae"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -930,9 +1062,9 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
+checksum = "6bb08299a6046833a879ace115697f12fd2bd6c8d3e93c909ffc9e0738e7cae0"
 dependencies = [
  "cpubits",
  "ctutils",
@@ -997,9 +1129,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.3"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03bb0e1cc970d482d121d9a1744999169b69a07470b3d644a7894e53fcaf4574"
+checksum = "38d28fb6aa7dd680b3ffd1a3e64e115c177bdba63c0ae7f9cd48129ff05c4fa0"
 dependencies = [
  "cmov",
  "subtle",
@@ -1076,7 +1208,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -1098,7 +1230,7 @@ checksum = "2ac7135c3ef02b2f7833bbeb1be5ba7f966dcde8a87c6b87f65a778d71a02785"
 dependencies = [
  "darling_core 0.24.1",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -1132,9 +1264,9 @@ dependencies = [
 
 [[package]]
 name = "defmt"
-version = "1.1.1"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2953bfe4f93bbd20cc71198842756f77d161884c99ebbabc41d80231ded88d1"
+checksum = "e4a0795ac740cb54d7b3775c9c17345f6aaecf884c01733b39d6017738e0e3e1"
 dependencies = [
  "bitflags 1.3.2",
  "defmt-macros",
@@ -1142,21 +1274,21 @@ dependencies = [
 
 [[package]]
 name = "defmt-macros"
-version = "1.1.1"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bad9c72e7ca2137e0dc3813245a0d282fd6daad32fd800af018306a9169b5fe8"
+checksum = "840bb056bd99c495c9188198a258ab787c79f306d864db3e6e8451442d6d8366"
 dependencies = [
  "defmt-parser",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.9",
 ]
 
 [[package]]
 name = "defmt-parser"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e"
+checksum = "71958f69fb2de856c5dd51ac9377e986ca1aa5919f931bf5395a807277f889a0"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1201,9 +1333,9 @@ dependencies = [
 
 [[package]]
 name = "deranged"
-version = "0.5.8"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
 
 [[package]]
 name = "derive_arbitrary"
@@ -1213,7 +1345,7 @@ checksum = "1b034bd7d5f032402a2479444dcc6f74e36a03f31854d41680fb240ef682a1ac"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -1284,7 +1416,7 @@ checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -1350,7 +1482,7 @@ dependencies = [
  "curve25519-dalek",
  "ed25519",
  "rand_core 0.10.1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "signature",
  "subtle",
  "zeroize",
@@ -1445,7 +1577,7 @@ checksum = "a65863d15a4ce2888bd2f0f543cc963d3879c3a022c8ee43f6141d479a3ac815"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -1470,9 +1602,9 @@ dependencies = [
 
 [[package]]
 name = "equivalent"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
 name = "errno"
@@ -1548,9 +1680,9 @@ checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.14"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
+checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
 name = "findshlibs"
@@ -1583,7 +1715,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
 dependencies = [
  "crc32fast",
- "miniz_oxide 0.9.1",
+ "zlib-rs",
 ]
 
 [[package]]
@@ -1595,6 +1727,15 @@ dependencies = [
  "borrow-or-share",
  "ref-cast",
  "serde",
+]
+
+[[package]]
+name = "flume"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e139bc46ca777eb5efaf62df0ab8cc5fd400866427e56c68b22e414e53bd3be"
+dependencies = [
+ "spin 0.9.9",
 ]
 
 [[package]]
@@ -1690,7 +1831,7 @@ checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -1720,6 +1861,21 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "generator"
+version = "0.8.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1be81b31c9ce4caf7f3178eeb90662bb1864d3ad363ec6bdada3201adff19c37"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows-link",
+ "windows-result",
 ]
 
 [[package]]
@@ -1889,6 +2045,12 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hermit-abi"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "hex"
@@ -2091,9 +2253,9 @@ dependencies = [
 
 [[package]]
 name = "icu_collections"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa68d21081c4a05d5a901a1c62add574c77048b6a1c67be3b50ce0b60d4ca513"
+checksum = "fe090a42a0d3140fed8c63263ed1fecc02422cb2f4bfe55cd8de2de1b8e105dd"
 dependencies = [
  "displaydoc",
  "potential_utf",
@@ -2105,9 +2267,9 @@ dependencies = [
 
 [[package]]
 name = "icu_locale_core"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d56e28588da92eee5c3201a6eff33fabdd49b62269c8938d4ff050ce4d900deb"
+checksum = "25d29b57c17c6528d0dc4c2141cfa2d08200465acb537a3909c8b9b8a4a984c0"
 dependencies = [
  "displaydoc",
  "litemap",
@@ -2118,9 +2280,9 @@ dependencies = [
 
 [[package]]
 name = "icu_normalizer"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12f9cf5f235641ed274641dd81c3f28d870e276763d0797aeeab72317b1c646f"
+checksum = "404a3b8c486f205c87fe7f23ab6894d84a4ad76d6e4671ae1981ba7def87c599"
 dependencies = [
  "icu_collections",
  "icu_normalizer_data",
@@ -2132,15 +2294,15 @@ dependencies = [
 
 [[package]]
 name = "icu_normalizer_data"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1563da1ed3e0b3bf3d74c9b85917ac9c56464d2f57242270c09c9e752f8021a0"
+checksum = "20f0088bfb7441f7a37fa0c9e20cb1e9cba1cac6b9ce8cd2a6dc44294f8e8cbc"
 
 [[package]]
 name = "icu_properties"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e7ca276ad3145661a65914e6daf131ca5120cd3dcee8f8f3214b8875184a148"
+checksum = "2ea83d991c56158f7cf898bf86436c1dfe7c07ee82fe88951f2695c9f37a379f"
 dependencies = [
  "displaydoc",
  "icu_collections",
@@ -2153,15 +2315,15 @@ dependencies = [
 
 [[package]]
 name = "icu_properties_data"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e590f038c1464a96894fd6d10127e90a8be4509f56ff7ecef851b15cee0b7caa"
+checksum = "b98f29af82d02b163fe50161388350e743bb3107cc8e8c2f7314cb505faddfcf"
 
 [[package]]
 name = "icu_provider"
-version = "2.3.1"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d27bbb9d3abbefac45d55f647c9de1d44aafcd1186eb91879afef17c396c3e73"
+checksum = "413099315636c588ee8f011190b329b971a09a8fae9d157e01dcae8379468514"
 dependencies = [
  "displaydoc",
  "icu_locale_core",
@@ -2211,12 +2373,23 @@ dependencies = [
 
 [[package]]
 name = "inout"
-version = "0.2.2"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
+checksum = "3b5cf4372d022092674a83b8febf5865f7a573cc0c5baec5e49c879b6a20978f"
 dependencies = [
  "block-padding",
  "hybrid-array",
+]
+
+[[package]]
+name = "io-uring"
+version = "0.7.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed3bd0ecfbb87805f538bb7b32e5239ca0763890c623e349860ecba69469f2bb"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "libc",
 ]
 
 [[package]]
@@ -2385,9 +2558,9 @@ dependencies = [
 
 [[package]]
 name = "jsonpath-rust"
-version = "1.0.11"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d23892d4caa103325a558250e9f4e406d81cf64f7c01679ae7a64e0413321e51"
+checksum = "b1c4668c489390e66d586fe2238ee8568473f7ac1607b411342f787c5e1bedd7"
 dependencies = [
  "pest",
  "pest_derive",
@@ -2420,12 +2593,40 @@ dependencies = [
  "fraction",
  "getrandom 0.3.4",
  "itoa",
- "jsonschema-regex",
- "jsonschema-value",
+ "jsonschema-regex 0.58.6",
+ "jsonschema-value 0.58.6",
  "num-cmp",
  "num-traits",
  "percent-encoding",
- "referencing",
+ "referencing 0.58.6",
+ "regex",
+ "serde",
+ "serde_json",
+ "strum",
+ "unicode-general-category",
+ "uuid-simd",
+]
+
+[[package]]
+name = "jsonschema"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b320ad34c177093d21622edc9215bb608294c2333ff296672c0c8265a5ee60c"
+dependencies = [
+ "ahash",
+ "bytecount",
+ "data-encoding",
+ "email_address",
+ "fancy-regex",
+ "fraction",
+ "getrandom 0.3.4",
+ "itoa",
+ "jsonschema-regex 0.59.0",
+ "jsonschema-value 0.59.0",
+ "num-cmp",
+ "num-traits",
+ "percent-encoding",
+ "referencing 0.59.0",
  "regex",
  "serde",
  "serde_json",
@@ -2444,10 +2645,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonschema-regex"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1472f7be79026f79e01a9b172263311e829d7c210d57b39cb57037abc0ce0500"
+dependencies = [
+ "regex-syntax",
+]
+
+[[package]]
 name = "jsonschema-value"
 version = "0.58.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39b7670345e5ce87371339d13705dbb9276b7e3e934bbe1efa2c6734a1f65a96"
+dependencies = [
+ "ahash",
+ "bytecount",
+ "fraction",
+ "getrandom 0.3.4",
+ "num-cmp",
+ "num-traits",
+ "serde_json",
+ "zmij",
+]
+
+[[package]]
+name = "jsonschema-value"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5a7550a7a84787e715ead0b47e01fa8c6bb7c3413630f91a8f2094c06c2078a"
 dependencies = [
  "ahash",
  "bytecount",
@@ -2490,11 +2716,12 @@ dependencies = [
 
 [[package]]
 name = "krabka-audit"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "arc-swap",
  "async-trait",
+ "bon",
  "bytes",
  "clap",
  "derive_more",
@@ -2502,13 +2729,13 @@ dependencies = [
  "krabka-ids",
  "krabka-macros",
  "krabka-protocol",
- "krabka-units",
+ "krabka-units 0.7.0",
  "krabka-verified",
  "qubit-clock",
  "ring",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -2516,10 +2743,11 @@ dependencies = [
 
 [[package]]
 name = "krabka-authz"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
+ "bon",
  "krabka-metadata",
  "krabka-security",
  "krabka-verified",
@@ -2528,8 +2756,8 @@ dependencies = [
 
 [[package]]
 name = "krabka-broker"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "apache-avro",
  "arc-swap",
@@ -2537,24 +2765,25 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.23.1",
+ "bon",
  "bytes",
  "clap",
- "crc32c",
  "dashmap",
  "derive_more",
  "exponential-backoff",
- "fancy-regex",
  "futures-util",
  "hex",
  "hostname",
+ "indexmap",
  "jsonpath-rust",
- "jsonschema",
+ "jsonschema 0.59.0",
  "krabka-audit",
  "krabka-authz",
  "krabka-client-core",
  "krabka-compression",
  "krabka-format",
  "krabka-ids",
+ "krabka-java-regex",
  "krabka-kraft-core",
  "krabka-log",
  "krabka-macros",
@@ -2569,7 +2798,7 @@ dependencies = [
  "krabka-security",
  "krabka-telemetry",
  "krabka-throttle",
- "krabka-units",
+ "krabka-units 0.7.0",
  "krabka-verified",
  "krabka-voters",
  "ktls",
@@ -2581,6 +2810,8 @@ dependencies = [
  "opentelemetry-proto",
  "prometheus-client",
  "prost 0.14.4",
+ "prost-reflect",
+ "protox-parse 0.10.0",
  "qubit-clock",
  "rcgen",
  "refined_type",
@@ -2592,8 +2823,9 @@ dependencies = [
  "serde",
  "serde-wincode",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "socket2",
+ "subtle",
  "thiserror 2.0.21",
  "tokio",
  "tokio-metrics",
@@ -2607,33 +2839,13 @@ dependencies = [
  "uuid",
  "wincode",
  "zerocopy",
+ "zlib-rs",
 ]
 
 [[package]]
 name = "krabka-client-admin"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-client-rs?rev=ee411691e39a05f3ed4e4ed8adc1e8939fd111b4#ee411691e39a05f3ed4e4ed8adc1e8939fd111b4"
-dependencies = [
- "assert2",
- "async-trait",
- "bytes",
- "futures-util",
- "krabka-client-core",
- "krabka-ids",
- "krabka-protocol",
- "krabka-security",
- "krabka-units",
- "ring",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "krabka-client-consumer"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-client-rs?rev=ee411691e39a05f3ed4e4ed8adc1e8939fd111b4#ee411691e39a05f3ed4e4ed8adc1e8939fd111b4"
+version = "0.7.1"
+source = "git+https://github.com/krabka-io/krabka-client-rs?rev=654ed57204924c70018e9ecd071bc7237b5e592c#654ed57204924c70018e9ecd071bc7237b5e592c"
 dependencies = [
  "assert2",
  "async-trait",
@@ -2643,7 +2855,32 @@ dependencies = [
  "krabka-client-core",
  "krabka-ids",
  "krabka-protocol",
- "krabka-units",
+ "krabka-security",
+ "krabka-units 0.7.0",
+ "maplit",
+ "ring",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "krabka-client-consumer"
+version = "0.7.1"
+source = "git+https://github.com/krabka-io/krabka-client-rs?rev=654ed57204924c70018e9ecd071bc7237b5e592c#654ed57204924c70018e9ecd071bc7237b5e592c"
+dependencies = [
+ "assert2",
+ "async-trait",
+ "bon",
+ "bytes",
+ "derive_more",
+ "futures-util",
+ "krabka-client-core",
+ "krabka-ids",
+ "krabka-protocol",
+ "krabka-units 0.7.0",
+ "maplit",
  "refined_type",
  "thiserror 2.0.21",
  "tokio",
@@ -2654,14 +2891,15 @@ dependencies = [
 
 [[package]]
 name = "krabka-client-core"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-client-rs?rev=ee411691e39a05f3ed4e4ed8adc1e8939fd111b4#ee411691e39a05f3ed4e4ed8adc1e8939fd111b4"
+version = "0.7.1"
+source = "git+https://github.com/krabka-io/krabka-client-rs?rev=654ed57204924c70018e9ecd071bc7237b5e592c#654ed57204924c70018e9ecd071bc7237b5e592c"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
  "bon",
  "bytes",
  "dashmap",
+ "derive_more",
  "dns-lookup",
  "futures-util",
  "hmac",
@@ -2669,7 +2907,8 @@ dependencies = [
  "krabka-ids",
  "krabka-protocol",
  "krabka-security",
- "krabka-units",
+ "krabka-units 0.7.0",
+ "maplit",
  "p12-keystore",
  "pbkdf2",
  "pkcs8",
@@ -2680,7 +2919,7 @@ dependencies = [
  "rustls-pki-types",
  "serde_json",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tokio",
  "tokio-rustls",
@@ -2692,8 +2931,8 @@ dependencies = [
 
 [[package]]
 name = "krabka-client-producer"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-client-rs?rev=ee411691e39a05f3ed4e4ed8adc1e8939fd111b4#ee411691e39a05f3ed4e4ed8adc1e8939fd111b4"
+version = "0.7.1"
+source = "git+https://github.com/krabka-io/krabka-client-rs?rev=654ed57204924c70018e9ecd071bc7237b5e592c#654ed57204924c70018e9ecd071bc7237b5e592c"
 dependencies = [
  "assert2",
  "async-trait",
@@ -2705,7 +2944,8 @@ dependencies = [
  "krabka-client-core",
  "krabka-compression",
  "krabka-protocol",
- "krabka-units",
+ "krabka-units 0.7.0",
+ "maplit",
  "refined_type",
  "thiserror 2.0.21",
  "tokio",
@@ -2716,13 +2956,13 @@ dependencies = [
 
 [[package]]
 name = "krabka-compression"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 dependencies = [
  "assert2",
  "bytes",
  "flate2",
- "krabka-units",
+ "krabka-units 0.7.0",
  "lz4rip",
  "lzzzz",
  "refined_type",
@@ -2733,11 +2973,12 @@ dependencies = [
 
 [[package]]
 name = "krabka-format"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
  "base64 0.23.1",
+ "bon",
  "clap",
  "derive_more",
  "krabka-macros",
@@ -2759,8 +3000,8 @@ dependencies = [
 
 [[package]]
 name = "krabka-ids"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 dependencies = [
  "assert2",
  "base64 0.23.1",
@@ -2771,14 +3012,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "krabka-java-regex"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
+dependencies = [
+ "fancy-regex",
+ "regex",
+ "regex-syntax",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "krabka-kraft-core"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
+ "bon",
  "bytes",
+ "derive_more",
  "krabka-macros",
- "krabka-units",
+ "krabka-units 0.7.0",
  "krabka-verified",
  "krabka-voters",
  "refined_type",
@@ -2788,29 +3042,32 @@ dependencies = [
 
 [[package]]
 name = "krabka-log"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
+ "bon",
  "bytes",
- "crc32c",
+ "compio",
+ "derive_more",
  "krabka-compression",
  "krabka-ids",
  "krabka-macros",
  "krabka-protocol",
- "krabka-units",
+ "krabka-units 0.7.0",
  "krabka-verified",
  "maplit",
  "rustix",
  "thiserror 2.0.21",
+ "tokio",
  "tracing",
  "zerocopy",
 ]
 
 [[package]]
 name = "krabka-logfmt"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
  "serde_json",
@@ -2820,23 +3077,23 @@ dependencies = [
 
 [[package]]
 name = "krabka-macros"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "moxy",
 ]
 
 [[package]]
 name = "krabka-metadata"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 dependencies = [
  "assert2",
  "bytes",
  "krabka-ids",
  "krabka-protocol",
  "krabka-security",
- "krabka-units",
+ "krabka-units 0.7.0",
  "krabka-voters",
  "serde",
  "serde-wincode",
@@ -2848,8 +3105,8 @@ dependencies = [
 
 [[package]]
 name = "krabka-object-store"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2862,7 +3119,7 @@ dependencies = [
  "reqwest 0.13.5",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -2899,7 +3156,7 @@ dependencies = [
  "krabka-object-store",
  "krabka-schema-serde",
  "krabka-security",
- "krabka-units",
+ "krabka-units 0.7.0",
  "kube",
  "mutants",
  "object_store",
@@ -2912,7 +3169,7 @@ dependencies = [
  "serde",
  "serde-saphyr 2.0.0",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "strum",
  "tempfile",
  "thiserror 2.0.21",
@@ -2928,15 +3185,15 @@ dependencies = [
 
 [[package]]
 name = "krabka-protocol"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 dependencies = [
  "arbitrary",
  "assert2",
  "bytes",
  "crc-fast",
  "krabka-compression",
- "krabka-units",
+ "krabka-units 0.7.0",
  "serde_json",
  "strum",
  "thiserror 2.0.21",
@@ -2945,12 +3202,13 @@ dependencies = [
 
 [[package]]
 name = "krabka-raft"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
  "async-trait",
  "base64 0.23.1",
+ "bon",
  "bytes",
  "dashmap",
  "derive_more",
@@ -2963,7 +3221,7 @@ dependencies = [
  "krabka-metadata",
  "krabka-protocol",
  "krabka-security",
- "krabka-units",
+ "krabka-units 0.7.0",
  "krabka-verified",
  "maplit",
  "refined_type",
@@ -2980,8 +3238,8 @@ dependencies = [
 
 [[package]]
 name = "krabka-records-legacy"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
  "bytes",
@@ -2989,16 +3247,17 @@ dependencies = [
  "krabka-compression",
  "krabka-ids",
  "krabka-protocol",
- "krabka-units",
+ "krabka-units 0.7.0",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "krabka-remote-storage"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "base64 0.23.1",
+ "bon",
  "bytes",
  "clap",
  "derive_more",
@@ -3009,14 +3268,14 @@ dependencies = [
  "krabka-macros",
  "krabka-object-store",
  "krabka-protocol",
- "krabka-units",
+ "krabka-units 0.7.0",
  "krabka-verified",
  "maplit",
  "object_store",
  "serde",
  "serde-wincode",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -3028,11 +3287,12 @@ dependencies = [
 
 [[package]]
 name = "krabka-remote-storage-topic"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
  "async-trait",
+ "bon",
  "bytes",
  "futures-util",
  "krabka-client-admin",
@@ -3042,7 +3302,7 @@ dependencies = [
  "krabka-macros",
  "krabka-protocol",
  "krabka-remote-storage",
- "krabka-units",
+ "krabka-units 0.7.0",
  "krabka-verified",
  "maplit",
  "refined_type",
@@ -3055,17 +3315,17 @@ dependencies = [
 
 [[package]]
 name = "krabka-schema-serde"
-version = "0.4.2"
-source = "git+https://github.com/krabka-io/krabka-schema-registry?rev=7e5115f74eaba368acf086b2d127230422db8fd6#7e5115f74eaba368acf086b2d127230422db8fd6"
+version = "0.4.3"
+source = "git+https://github.com/krabka-io/krabka-schema-registry?rev=ac4fe56eb1543df7c947393df2b9e893367e79ae#ac4fe56eb1543df7c947393df2b9e893367e79ae"
 dependencies = [
  "apache-avro",
  "assert2",
  "bytes",
- "jsonschema",
- "krabka-units",
+ "jsonschema 0.58.6",
+ "krabka-units 0.6.0",
  "prost 0.14.4",
  "prost-reflect",
- "protox-parse",
+ "protox-parse 0.9.0",
  "reqwest 0.13.5",
  "schemars",
  "serde",
@@ -3076,8 +3336,8 @@ dependencies = [
 
 [[package]]
 name = "krabka-security"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 dependencies = [
  "arc-swap",
  "assert2",
@@ -3087,7 +3347,7 @@ dependencies = [
  "hmac",
  "jsonpath-rust",
  "krabka-sspi",
- "krabka-units",
+ "krabka-units 0.7.0",
  "pbkdf2",
  "rcgen",
  "refined_type",
@@ -3098,7 +3358,7 @@ dependencies = [
  "rustls-webpki",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "strum",
  "subtle",
  "thiserror 2.0.21",
@@ -3145,7 +3405,7 @@ dependencies = [
  "rustls-native-certs",
  "serde",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "time",
  "tokio",
  "tracing",
@@ -3159,8 +3419,8 @@ dependencies = [
 
 [[package]]
 name = "krabka-telemetry"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
  "axum",
@@ -3169,7 +3429,7 @@ dependencies = [
  "krabka-logfmt",
  "krabka-macros",
  "krabka-trace-context",
- "krabka-units",
+ "krabka-units 0.7.0",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
@@ -3187,12 +3447,12 @@ dependencies = [
 
 [[package]]
 name = "krabka-throttle"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
  "derive_more",
- "krabka-units",
+ "krabka-units 0.7.0",
  "krabka-verified",
  "num-traits",
  "qubit-clock",
@@ -3200,8 +3460,8 @@ dependencies = [
 
 [[package]]
 name = "krabka-trace-context"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 dependencies = [
  "opentelemetry",
  "serde",
@@ -3213,7 +3473,19 @@ dependencies = [
 [[package]]
 name = "krabka-units"
 version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20d34164235b4f3fbd30ae37fd0bcdf4a2af6e35c7024ffb55175715f668b3b8"
+dependencies = [
+ "num-traits",
+ "serde",
+ "thiserror 2.0.21",
+ "uom",
+]
+
+[[package]]
+name = "krabka-units"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 dependencies = [
  "num-traits",
  "serde",
@@ -3223,19 +3495,21 @@ dependencies = [
 
 [[package]]
 name = "krabka-verified"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 dependencies = [
  "assert2",
+ "bon",
  "creusot-std",
  "derive_more",
  "krabka-ids",
+ "krabka-macros",
 ]
 
 [[package]]
 name = "krabka-voters"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 dependencies = [
  "assert2",
  "krabka-ids",
@@ -3387,9 +3661,9 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "libc"
-version = "0.2.190"
+version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
+checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libm"
@@ -3408,6 +3682,12 @@ name = "litemap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
+
+[[package]]
+name = "local-event"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23ab4b951e96ffb2da6e25cec3d038d0e2930f4c406d1ec194b5120ae41ec6d3"
 
 [[package]]
 name = "lock_api"
@@ -3430,7 +3710,16 @@ version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff472f899b4ec2d99161c51f60ff7075eeb3097069a36050d8037a6325eb8154"
 dependencies = [
- "logos-derive",
+ "logos-derive 0.15.1",
+]
+
+[[package]]
+name = "logos"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb2c55a318a87600ea870ff8c2012148b44bf18b74fad48d0f835c38c7d07c5f"
+dependencies = [
+ "logos-derive 0.16.1",
 ]
 
 [[package]]
@@ -3450,19 +3739,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-codegen"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58b3ffaa284e1350d017a57d04ada118c4583cf260c8fb01e0fe28a2e9cf8970"
+dependencies = [
+ "fnv",
+ "proc-macro2",
+ "quote",
+ "regex-automata",
+ "regex-syntax",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "logos-derive"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "605d9697bcd5ef3a42d38efc51541aa3d6a4a25f7ab6d1ed0da5ac632a26b470"
 dependencies = [
- "logos-codegen",
+ "logos-codegen 0.15.1",
+]
+
+[[package]]
+name = "logos-derive"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52d3a9855747c17eaf4383823f135220716ab49bea5fbea7dd42cc9a92f8aa31"
+dependencies = [
+ "logos-codegen 0.16.1",
+]
+
+[[package]]
+name = "loom"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "419e0dc8046cb947daa77eb95ae174acfbddb7673b4151f56d1eed8e93fbfaca"
+dependencies = [
+ "cfg-if",
+ "generator",
+ "pin-utils",
+ "scoped-tls",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
 name = "lru"
-version = "0.18.5"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
+checksum = "4a9f71e3591c7ec44d3e563e87bf14ddc2bada8519dca046e5b0e560cd004e2d"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -3475,9 +3803,9 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
 name = "lz4rip"
-version = "0.11.10"
+version = "0.11.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37d8ecd80125a8e67ebcaacd9fad5757efa2b6f5b875e1b4ce567814d758a419"
+checksum = "3a169dc8ba82c0df1f91693abc006c016202707cd80d4654057de13d383f1db3"
 dependencies = [
  "lz4rip-core",
  "lz4rip-decode",
@@ -3487,24 +3815,24 @@ dependencies = [
 
 [[package]]
 name = "lz4rip-core"
-version = "0.5.6"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edb50206b4d66e3ec849d2e7ac9257d79c19733c435909a0a46cbb34f9ec7107"
+checksum = "687eec55dae7866f9a8cf785555aa81ea02ebed8a13c7079c4a4f59c2de46e92"
 
 [[package]]
 name = "lz4rip-decode"
-version = "0.10.4"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d89c54c126f2acb3979c7d8fc9482506d6371438f514f2e83ef96ede9b585594"
+checksum = "624f02c3b9c1ab1ea3ff19f01e72296f1edf6aeb604606bfd81c8756ecb66e00"
 dependencies = [
  "lz4rip-core",
 ]
 
 [[package]]
 name = "lz4rip-encode"
-version = "0.10.8"
+version = "0.10.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51a3509ddaac04400136c19f6a2d8427c18c46357eb584c9908b3ff476dcd13e"
+checksum = "19d07fb7d01f4fe624c9b63f942671e32088794647bce814d3960b89580554b2"
 dependencies = [
  "lz4rip-core",
 ]
@@ -3566,9 +3894,9 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "memmap2"
-version = "0.9.11"
+version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
+checksum = "6b0ca1155a9ecc25aa12e8313a119f32edf0255fea2f44839c4ac0a12b2ac157"
 dependencies = [
  "libc",
 ]
@@ -3638,7 +3966,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
 dependencies = [
  "adler2",
- "simd-adler32",
 ]
 
 [[package]]
@@ -3653,10 +3980,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "moxy"
-version = "0.5.3"
+name = "mod_use"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92b03e44f6d508f160eb9860df8415a729da319ab213ef197bca18a714598d6a"
+checksum = "21909324aa58f5c284d91cac514c6d081210901dc372d7c8ea6a9d7e0406097a"
+
+[[package]]
+name = "moxy"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0508f3de0fb346df5b70d3535e477ee71692eb857e3a3a9b6ac8bb3fa529a5a3"
 dependencies = [
  "moxy-ast",
  "moxy-macros",
@@ -3666,24 +3999,24 @@ dependencies = [
 
 [[package]]
 name = "moxy-ast"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "030fee1e12882f7aa661d16f55c51e38858e63ec13adbd9dc158f5a02c1c0cf9"
+checksum = "abb1b8779c7cdf844c9706fdda948c8d4ea6e3d9ab24b426f6ed6704d745e325"
 dependencies = [
  "moxy-token",
 ]
 
 [[package]]
 name = "moxy-build"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1197669e7d72914314a6544c83af0fb3799eba4606146290a57da95a584221df"
+checksum = "729d11e1b22d86ae1bd553c164ca4d18e6b78bb1193438aee4076b058c09a6b1"
 
 [[package]]
 name = "moxy-diagnostic"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cbc3f6aa3f8625f40a8b792cefa1bd49799ba7103c0772ac47fdf81463e5511"
+checksum = "c19919c56e8b6258abdbcfae39d7c5573626adc980af668ec0408ddc5da805e2"
 dependencies = [
  "moxy-ast",
  "moxy-build",
@@ -3692,9 +4025,9 @@ dependencies = [
 
 [[package]]
 name = "moxy-fmt"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f28b3d5a489fbb2afb2b0b2bf27509c55c5b3c7f4fa6ed7cd577aca6c576caa"
+checksum = "951945814e3bb05c37673abfafac6ad8de944f92976d9072a745550783063c35"
 dependencies = [
  "moxy-ast",
  "moxy-token",
@@ -3702,9 +4035,9 @@ dependencies = [
 
 [[package]]
 name = "moxy-macros"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa2b72af5cb32d6351565ec439e102021849a574e97b2b5b237aedc9117c1b50"
+checksum = "83e54e3b30da83a0d7e0bdbe7bd2ebd4526ddfab3c76ea6e5646e228ef3f5bcd"
 dependencies = [
  "moxy-ast",
  "moxy-diagnostic",
@@ -3715,9 +4048,9 @@ dependencies = [
 
 [[package]]
 name = "moxy-template"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca51eacede1cdb40f9abc83692bff094301a55d3a6a25d7edaeaa26a029c670d"
+checksum = "6949d5c02f4665407440ad4f8bc19dcb1e0f505b0916f3695ebf459845da3a07"
 dependencies = [
  "moxy-ast",
  "moxy-token",
@@ -3725,9 +4058,9 @@ dependencies = [
 
 [[package]]
 name = "moxy-token"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ec96d4ce053bf8a8b8924c7ba4f6c31088f613c516685b7881c027fa7a516d6"
+checksum = "1e0a429d8845a78c22ce4141054d7760e71ef77343260ed35c8bc57b1ccc7959"
 dependencies = [
  "moxy-build",
  "unicode-ident",
@@ -3867,7 +4200,7 @@ checksum = "e4e98dc3b890f6c23a0f9d3d491a2823d0dea0fa656302a13dd225fa924112a8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -4021,9 +4354,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "opentelemetry"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cdb0b1b267eb9db3331b434ed9ddab10d50e280a9adf9d13e5233e2002b61b5"
+checksum = "8c1f1a6ac9c875a4941e4c7c085b61e8f4daa326de03b4701768c3491a6ad9ee"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -4034,9 +4367,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-appender-tracing"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2b304e8d8f11326ba366a99ca5c7aaf7cd397b67268a332437175aeb42a40db"
+checksum = "1f01f1c53c46ce80e5fd8cb7a646f13766fd8f315a8a5b75b9bad59a08d2c5c7"
 dependencies = [
  "opentelemetry",
  "tracing",
@@ -4046,9 +4379,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-http"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee2c3625b8aa04209f7e01e513bc8044da9687fa38a9eacf59628ca5f3b87300"
+checksum = "302249bd8ee804789faaa7b5b2cbf79bc61cb864714079c644e3828af5b7e811"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4059,9 +4392,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-otlp"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "699a67345e21962a231955b9059a157e428b219fa5df8efe11f08346fb23a344"
+checksum = "0756af24841e367128ef31c831999937b8b5c5197d47914590d8f4e2e88c2e1a"
 dependencies = [
  "http",
  "httpdate",
@@ -4079,9 +4412,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-proto"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25da1ac11a0aeccf38d7f77ee0348715adaf8340f65ad46c94a02c6b20e2f65d"
+checksum = "d576f5dddc3299341bcd85a04be17b2564844c0c9563214f02d85f2524d1afae"
 dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
@@ -4092,9 +4425,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry_sdk"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb39533d9d1c912123efd7d41d7e0c29d16917b60ce15b4c8d87cb1af7f67520"
+checksum = "372a912db2974d1990207006fd0e3aa0ef3fd4ad3be43c65cfaadf2206866061"
 dependencies = [
  "futures-channel",
  "futures-executor",
@@ -4163,7 +4496,7 @@ dependencies = [
  "rand 0.10.3",
  "rc2",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "x509-parser",
 ]
@@ -4178,7 +4511,7 @@ dependencies = [
  "elliptic-curve",
  "primefield",
  "primeorder",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -4192,7 +4525,7 @@ dependencies = [
  "fiat-crypto",
  "primefield",
  "primeorder",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -4206,7 +4539,7 @@ dependencies = [
  "elliptic-curve",
  "primefield",
  "primeorder",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -4259,14 +4592,14 @@ dependencies = [
  "digest 0.11.3",
  "hmac",
  "kdf",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
 name = "pearlite-syn"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d109ea947aee5910cb3a17ec83e0f026e05934b12335b97d05d825320b4cb15"
+checksum = "e0cada22bee420c97f91bd98f0e1effdd6ef5ab219df0561f35144dcb504ebfd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4310,19 +4643,21 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pest"
-version = "2.9.2"
+version = "2.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45d3aca230fad2e6f6317ca0a72724338c4960cb97168a85cdee66df4a9a21a8"
+checksum = "fd47a460a9cbc3b3429c7e22bf0d76653e779319bae45a499ca010c9a990bb23"
 dependencies = [
  "memchr",
+ "psm",
+ "stacker",
  "ucd-trie",
 ]
 
 [[package]]
 name = "pest_derive"
-version = "2.9.2"
+version = "2.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "284b60557f2c4a2e72ad3f2d34d42685a2fa4a6a61d0d2a10c0ae2a5e916c2cf"
+checksum = "203e46697708f7519ab1608393cf89239cafb46b8e6d08a8ffe359359b11ef44"
 dependencies = [
  "pest",
  "pest_generator",
@@ -4330,22 +4665,22 @@ dependencies = [
 
 [[package]]
 name = "pest_generator"
-version = "2.9.2"
+version = "2.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d9d1f08a115309ee99268cf85e5228e0e56aa9caf8841ec12866b6be07c3109"
+checksum = "e84ae6340a458d3d6cfc73cf328cf3cfe90b2484cd0de25eb66aa954615ed4d5"
 dependencies = [
  "pest",
  "pest_meta",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.9",
 ]
 
 [[package]]
 name = "pest_meta"
-version = "2.9.2"
+version = "2.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed93ba1a9ffcca32130a5188701c81c0c49cf00d4b7c5007d5148951d743adcb"
+checksum = "b57f92f32b3dbce6598fd8f5cdf1f06a6072570b8103fa21728fa9036923e710"
 dependencies = [
  "pest",
 ]
@@ -4386,7 +4721,7 @@ dependencies = [
  "rsa",
  "serde",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "sha3",
  "thiserror 2.0.21",
  "x25519-dalek",
@@ -4533,7 +4868,7 @@ dependencies = [
  "rand_core 0.10.1",
  "scrypt",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "spki",
 ]
 
@@ -4554,6 +4889,20 @@ name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
+
+[[package]]
+name = "polling"
+version = "3.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d0e4f59085d47d8241c88ead0f274e8a0cb551f3625263c05eb8dd897c34218"
+dependencies = [
+ "cfg-if",
+ "concurrent-queue",
+ "hermit-abi",
+ "pin-project-lite",
+ "rustix",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "polyval"
@@ -4624,7 +4973,7 @@ dependencies = [
  "prost-derive 0.12.6",
  "sha2 0.10.9",
  "smallvec",
- "spin",
+ "spin 0.10.1",
  "symbolic-demangle",
  "tempfile",
  "thiserror 2.0.21",
@@ -4656,7 +5005,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
 dependencies = [
  "proc-macro2",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -4737,7 +5086,7 @@ checksum = "01e34894696ff94f64a20c2c373a6440903e9c2789a303d68ec6e6f953f890e4"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -4841,10 +5190,31 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "072eee358134396a4643dff81cfff1c255c9fbd3fb296be14bdb6a26f9156366"
 dependencies = [
- "logos",
+ "logos 0.15.1",
  "miette",
  "prost-types 0.14.4",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "protox-parse"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34efee6fad0cf6d71642d20a66bfe0c281919c9577e7c66d20360dfcb7549272"
+dependencies = [
+ "logos 0.16.1",
+ "miette",
+ "prost-types 0.14.4",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "psm"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "200b9ff220857e53e184257720a14553b2f4aa02577d2ed9842d45d4b9654810"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -4855,9 +5225,9 @@ checksum = "5a651516ddc9168ebd67b24afd085a718be02f8858fe406591b013d101ce2f40"
 
 [[package]]
 name = "qubit-clock"
-version = "0.13.0"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b6ac8d4db46f084d6e21db1f091901d8a1561bacfe73d40eefae0cc4581a5e1"
+checksum = "127b9c860cc779d2f85212928fa0be9101061f22dead534239c8d5b078348fc6"
 dependencies = [
  "qubit-collections",
  "thiserror 2.0.21",
@@ -4865,9 +5235,9 @@ dependencies = [
 
 [[package]]
 name = "qubit-collections"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcb596d37e055a48800f0381926881152612b9171cad3be8e91dee97daee6f5b"
+checksum = "6008a274d2b2eb33c6039d34925f5e35235a9e1f9441e351d379fcd766d2e4e4"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -5104,7 +5474,7 @@ checksum = "92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -5112,6 +5482,23 @@ name = "referencing"
 version = "0.58.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "558f3855529c0a7e78a48e409fa653456e55f1b167eab4109c16a255b7727e3f"
+dependencies = [
+ "ahash",
+ "fluent-uri",
+ "getrandom 0.3.4",
+ "hashbrown 0.17.1",
+ "itoa",
+ "micromap",
+ "parking_lot",
+ "percent-encoding",
+ "serde_json",
+]
+
+[[package]]
+name = "referencing"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "473f4dcca28ead7ee0f8e5b5d0bbae2549f4fc4c958fb20af328961b6c174be3"
 dependencies = [
  "ahash",
  "fluent-uri",
@@ -5356,9 +5743,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d"
+checksum = "4a073f5dc7469f984c52ad2752b63b0807745133b6de880b7b64c1ac4c48aec4"
 dependencies = [
  "openssl-probe",
  "rustls-pki-types",
@@ -5448,18 +5835,18 @@ dependencies = [
 
 [[package]]
 name = "schannel"
-version = "0.1.29"
+version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
+checksum = "9cb23c424d8ee841bb4d813677ca237e2a610067d594fec130f87d6093495ab5"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "schemars"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a"
+checksum = "ab508826f74a77ca9d5aba6ff19b522583ee3eaf28a19384ff3d0e5835fadf6e"
 dependencies = [
  "dyn-clone",
  "ref-cast",
@@ -5470,15 +5857,21 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d98c67716b46af2f0b8cf752abc930f6f9aecfbf671ecfb531db8a31dbe4e2ba"
+checksum = "e1c3a92094fa7d61aa124645844facb6b554dfc797136d0f5fd1f890e2bffc69"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde_derive_internals",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
+
+[[package]]
+name = "scoped-tls"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
 
 [[package]]
 name = "scopeguard"
@@ -5495,7 +5888,7 @@ dependencies = [
  "cfg-if",
  "pbkdf2",
  "salsa20",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -5644,7 +6037,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -5655,14 +6048,14 @@ checksum = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
  "itoa",
  "memchr",
@@ -5737,9 +6130,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
@@ -5793,12 +6186,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "simd-adler32"
-version = "0.3.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
-
-[[package]]
 name = "simd_cesu8"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5821,6 +6208,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
+name = "slotmap"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
+dependencies = [
+ "version_check",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5840,6 +6236,15 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "spin"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
+dependencies = [
+ "lock_api",
 ]
 
 [[package]]
@@ -5872,6 +6277,19 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "stacker"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "707f49d46706bacf8a2b00d51dace3f9de527c13eec3778f570c411f89e69967"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "psm",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "static_assertions"
@@ -5947,9 +6365,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.6"
+version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
+checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5963,6 +6381,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 dependencies = [
  "futures-core",
+]
+
+[[package]]
+name = "synchrony"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9d6d5fbc4583cf3e5eee953506f13853a42ee6b4a21a983dffffb10c765cb80"
+dependencies = [
+ "event-listener",
+ "futures-util",
+ "local-event",
+ "loom",
 ]
 
 [[package]]
@@ -5984,7 +6414,7 @@ checksum = "901704edd0dfe137f1987838ee4f259e4e063c31371bdb423f7ae38ec6f77f02"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6015,7 +6445,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -6029,6 +6459,15 @@ checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "thin-cell"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9d3c47fea6e344ef1ac01be266c27945ec30ae8049c3292c897f0878de5c784"
+dependencies = [
+ "synchrony",
 ]
 
 [[package]]
@@ -6068,7 +6507,7 @@ checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6113,9 +6552,9 @@ dependencies = [
 
 [[package]]
 name = "tinystr"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1e27c91459209c2986af3dcf603a5a74a4368754ce37414f59acc971167f643"
+checksum = "abc840c238154d58f9e86b2792261edfde565a17696e1cda1a449de27979801a"
 dependencies = [
  "displaydoc",
  "zerovec",
@@ -6129,9 +6568,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
-version = "1.53.2"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "bytes",
  "libc",
@@ -6151,7 +6590,7 @@ checksum = "78773a2a397f451582ce068015985c33193cf6dea8b74d2a639fe457b2f07b0e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6188,9 +6627,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.19"
+version = "0.7.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
+checksum = "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b"
 dependencies = [
  "bytes",
  "futures-core",
@@ -6204,9 +6643,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.1.7+spec-1.1.0"
+version = "1.1.8+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7874cd34dd99040fc24e30923aa64a60a81ff3ddfe2b8129ccc84ba24949deed"
+checksum = "20489e00e4d8741d6be680764cc12e270655e375a20d1011e844a9c3379e678d"
 dependencies = [
  "indexmap",
  "serde_core",
@@ -6228,9 +6667,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.25.16+spec-1.1.0"
+version = "0.25.17+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88f38f3af8bf71841c67a990f4e2b52143b2d0a1a994c72513ff4c14977fc722"
+checksum = "e3641d5bbb5349a79e1020a242d251efbc546ad8048d133958323ce9c40a9c9c"
 dependencies = [
  "indexmap",
  "toml_datetime",
@@ -6240,9 +6679,9 @@ dependencies = [
 
 [[package]]
 name = "toml_parser"
-version = "1.1.4+spec-1.1.0"
+version = "1.1.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bed810ee007d8e7f9cf20b4774e7198142fa27186e0f805871da7f3c39eaf333"
+checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
  "winnow",
 ]
@@ -6477,9 +6916,9 @@ checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
+checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
 name = "unicode-segmentation"
@@ -6561,9 +7000,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.27.0"
+version = "1.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97277d36b9c3ace13e58fa6e753f8b0bbbf302a18dd193240d70f9e29681059a"
+checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
@@ -6676,7 +7115,7 @@ dependencies = [
  "bumpalo",
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
  "wasm-bindgen-shared",
 ]
 
@@ -6724,9 +7163,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.10"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58ec80e73fd8baf57bf0d9615554c75348bda990d6d5bbeab964dd068319fecb"
+checksum = "e49d0e65abc00c142e8f9428da991da9f1a250c39be97459901eb12b9b49f62a"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -6770,9 +7209,9 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "wincode"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d4abae4bfc30e59d97d3ea4924e5c5e7fede946390bffbd52c076c081b87a6c"
+checksum = "063b5affe63fb4e584a33101d8808f01f2348b4f533db6223bf27263a0fdb9e9"
 dependencies = [
  "pastey",
  "proc-macro2",
@@ -7074,9 +7513,9 @@ dependencies = [
 
 [[package]]
 name = "yoke"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "709fe23a0424b6a435d82152b1bd3fdfb0833487d5fa90d05d42762a9891fef5"
+checksum = "417ef3fcf6c300b7dbd25c85531a746931c02ad536f3cf4786ed1e88223340b3"
 dependencies = [
  "stable_deref_trait",
  "yoke-derive",
@@ -7091,24 +7530,24 @@ checksum = "ec8ebde2db3681e8c9980cc27822030e68752690ddfa9473e739aeb4dbde6d71"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
  "synstructure 0.14.0",
 ]
 
 [[package]]
 name = "zerocopy"
-version = "0.8.62"
+version = "0.8.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86502bf56ac7c77571a32e2647bb2a15894565e981fb2a48d7bde2d91c965a9d"
+checksum = "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.62"
+version = "0.8.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5457206954b06561e2608c7e19cf58b1926586d999c246eebe4502f7e2039d1a"
+checksum = "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7132,7 +7571,7 @@ checksum = "f75b4683f6c7f45248d4d64056a24298c6281e0993356d7d1b4a1a962ef10d4a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
  "synstructure 0.14.0",
 ]
 
@@ -7169,9 +7608,9 @@ dependencies = [
 
 [[package]]
 name = "zerovec"
-version = "0.11.8"
+version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb0464e17806c1d976d5cba29399c7f08e516e279e2ba493f63123b5fca67dd8"
+checksum = "f58a2799cfe9a1670c7ea8edbd52ef8edb93cb37a7f83bf31ba9e35d9dae6a40"
 dependencies = [
  "yoke",
  "zerofrom",
@@ -7180,14 +7619,20 @@ dependencies = [
 
 [[package]]
 name = "zerovec-derive"
-version = "0.11.6"
+version = "0.11.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34df6fc39dbd26ddc9c10e6a2984476e13acce22e64e4487636ef494369225da"
+checksum = "c3743ddbf47738d929cd1ae2e199d40d0162979dfe31aef8ae646d2bf00bf97a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.9",
 ]
+
+[[package]]
+name = "zlib-rs"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
 
 [[package]]
 name = "zmij"
@@ -7197,27 +7642,27 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
 name = "zstd"
-version = "0.14.0"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf06bd8162af0734b344780deb55b42a2429ae430870d13fcc12f238e880fe6e"
+checksum = "db3ae9bf90af6e40197bef767eeefc46ad6397420fe873830bd85e5fbbfb3c70"
 dependencies = [
  "zstd-safe",
 ]
 
 [[package]]
 name = "zstd-safe"
-version = "8.0.0"
+version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae42c0555055784c70058d19ba8e275528e8a99a706684868ace5da4e716a4ab"
+checksum = "ded520f16b29e1a9b771c722221b2b0a0398c2316d9bb3c42b458a5414d7434b"
 dependencies = [
  "zstd-sys",
 ]
 
 [[package]]
 name = "zstd-sys"
-version = "2.1.0+zstd.1.5.7"
+version = "2.1.2+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ef0a8027ec3ee71300ab3bcbcd0393f434aa72b91ca6d635a39941deae8eea0"
+checksum = "481ada9c543b2323cbb7bbdbb5249177fbf0188ed959ed2c15e4b22421c84ed3"
 dependencies = [
  "cc",
  "pkg-config",
@@ -7235,18 +7680,18 @@ source = "git+https://github.com/krabka-io/krabka-gateway?rev=44db5987093d62c156
 
 [[patch.unused]]
 name = "krabka-backup"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 
 [[patch.unused]]
 name = "krabka-barrier"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 
 [[patch.unused]]
 name = "krabka-bench-driver"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 
 [[patch.unused]]
 name = "krabka-blockstore"
@@ -7260,8 +7705,8 @@ source = "git+https://github.com/krabka-io/krabka-cli?rev=e94261918532e9f4ebcd08
 
 [[patch.unused]]
 name = "krabka-client-coordination"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-client-rs?rev=ee411691e39a05f3ed4e4ed8adc1e8939fd111b4#ee411691e39a05f3ed4e4ed8adc1e8939fd111b4"
+version = "0.7.1"
+source = "git+https://github.com/krabka-io/krabka-client-rs?rev=654ed57204924c70018e9ecd071bc7237b5e592c#654ed57204924c70018e9ecd071bc7237b5e592c"
 
 [[patch.unused]]
 name = "krabka-client-streams"
@@ -7290,8 +7735,8 @@ source = "git+https://github.com/krabka-io/krabka-connect?rev=0d24560e113fe7dff6
 
 [[patch.unused]]
 name = "krabka-docgen"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 
 [[patch.unused]]
 name = "krabka-gateway"
@@ -7300,13 +7745,13 @@ source = "git+https://github.com/krabka-io/krabka-gateway?rev=44db5987093d62c156
 
 [[patch.unused]]
 name = "krabka-guard"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 
 [[patch.unused]]
 name = "krabka-hlc"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 
 [[patch.unused]]
 name = "krabka-integration"
@@ -7315,13 +7760,13 @@ source = "git+https://github.com/krabka-io/krabka-o11y?rev=8990bf19e6f4a180ad42d
 
 [[patch.unused]]
 name = "krabka-kafka-tap"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 
 [[patch.unused]]
 name = "krabka-log-iobench"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 
 [[patch.unused]]
 name = "krabka-logql"
@@ -7350,8 +7795,8 @@ source = "git+https://github.com/krabka-io/krabka-o11y?rev=8990bf19e6f4a180ad42d
 
 [[patch.unused]]
 name = "krabka-parse-benches"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 
 [[patch.unused]]
 name = "krabka-pprof"
@@ -7370,8 +7815,8 @@ source = "git+https://github.com/krabka-io/krabka-o11y?rev=8990bf19e6f4a180ad42d
 
 [[patch.unused]]
 name = "krabka-protocol-codegen"
-version = "0.6.0"
-source = "git+https://github.com/krabka-io/krabka-protocol?rev=574e0e385f5d5187979049aa0578f1abf3fa123b#574e0e385f5d5187979049aa0578f1abf3fa123b"
+version = "0.7.0"
+source = "git+https://github.com/krabka-io/krabka-protocol?rev=e807cd8a210fb01636b3c1d436c0e73176419614#e807cd8a210fb01636b3c1d436c0e73176419614"
 
 [[patch.unused]]
 name = "krabka-query-frontend"
@@ -7390,13 +7835,13 @@ source = "git+https://github.com/krabka-io/krabka-connect?rev=0d24560e113fe7dff6
 
 [[patch.unused]]
 name = "krabka-restore"
-version = "1.0.0"
-source = "git+https://github.com/krabka-io/krabka-broker?rev=8cbc01f3859b5ab24670c304ce6589c79c227cc9#8cbc01f3859b5ab24670c304ce6589c79c227cc9"
+version = "1.0.8"
+source = "git+https://github.com/krabka-io/krabka-broker?rev=c9c25c01b8fec0f9acdba6372478d8bb93cdc951#c9c25c01b8fec0f9acdba6372478d8bb93cdc951"
 
 [[patch.unused]]
 name = "krabka-schema-registry"
-version = "0.4.2"
-source = "git+https://github.com/krabka-io/krabka-schema-registry?rev=7e5115f74eaba368acf086b2d127230422db8fd6#7e5115f74eaba368acf086b2d127230422db8fd6"
+version = "0.4.3"
+source = "git+https://github.com/krabka-io/krabka-schema-registry?rev=ac4fe56eb1543df7c947393df2b9e893367e79ae#ac4fe56eb1543df7c947393df2b9e893367e79ae"
 
 [[patch.unused]]
 name = "krabka-sdk-conformance"
