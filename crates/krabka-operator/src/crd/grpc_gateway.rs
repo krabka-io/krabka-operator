@@ -15,6 +15,8 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::telemetry::TelemetrySpec;
+
 #[derive(CustomResource, Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[kube(
     group = "krabka.io",
@@ -524,26 +526,6 @@ pub struct SecretKeyRef {
     pub key: String,
 }
 
-/// OpenTelemetry observability configuration.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct TelemetrySpec {
-    /// OTLP exporter endpoint URL, for example
-    /// `http://otel-collector.observability.svc:4317`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub otlp_endpoint: Option<String>,
-
-    /// OTLP exporter protocol. One of `grpc` or `http`. Default `grpc`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub otlp_protocol: Option<String>,
-
-    /// Fraction of traces to sample, in the range `[0.0, 1.0]`. Default
-    /// 1.0, which samples all traces.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(range(min = 0.0, max = 1.0))]
-    pub sample_ratio: Option<f64>,
-}
-
 /// Status reported back by the controller onto each `KafkaGrpcGateway`.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -765,6 +747,7 @@ mod tests {
                     otlp_endpoint: Some("http://otel:4317".into()),
                     otlp_protocol: Some("grpc".into()),
                     sample_ratio: Some(1.0),
+                    gcp_project_id: Some("demo-project".into()),
                 }),
             },
         );
@@ -774,6 +757,7 @@ mod tests {
             "\"targetTopic\":\"raw-orders\"",
             "\"targetUrl\":\"https://example.com/hook\"",
             "\"otlpEndpoint\":\"http://otel:4317\"",
+            "\"gcpProjectId\":\"demo-project\"",
         ] {
             assert!(json.contains(want), "case {want:?}; got: {json}");
         }

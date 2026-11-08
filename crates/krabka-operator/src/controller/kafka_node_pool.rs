@@ -929,6 +929,9 @@ fn render_broker_container(spec: BrokerContainerSpec<'_>) -> serde_json::Value {
     {
         env.push(json!({ "name": "KRABKA_OTLP_ENABLED", "value": "true" }));
         env.push(json!({ "name": "KRABKA_OTLP_ENDPOINT", "value": otlp.endpoint }));
+        if let Some(project) = otlp.gcp_project_id.as_deref() {
+            env.push(json!({ "name": "KRABKA_GCP_PROJECT_ID", "value": project }));
+        }
         if let Some(p) = otlp.protocol {
             env.push(json!({
                 "name": "KRABKA_OTLP_PROTOCOL",
@@ -6231,6 +6234,7 @@ mod tests {
                 sample_ratio: Some(0.25),
                 service_name: Some("svc".into()),
                 timeout: Some(krabka_units::prelude::secs(7)),
+                gcp_project_id: Some("demo-project".into()),
             },
         );
         let pool = pool_fixture("brokers", "demo", 1);
@@ -6263,6 +6267,7 @@ mod tests {
         for (name, want) in [
             ("KRABKA_OTLP_ENABLED", "true"),
             ("KRABKA_OTLP_ENDPOINT", "http://otel:4317"),
+            ("KRABKA_GCP_PROJECT_ID", "demo-project"),
             ("KRABKA_OTLP_PROTOCOL", "http/protobuf"),
             ("KRABKA_OTLP_SAMPLE_RATIO", "0.25"),
             ("OTEL_SERVICE_NAME", "svc"),
@@ -6282,6 +6287,7 @@ mod tests {
                 sample_ratio: None,
                 service_name: None,
                 timeout: None,
+                gcp_project_id: None,
             },
         );
         let pool = pool_fixture("brokers", "demo", 1);
@@ -6307,6 +6313,7 @@ mod tests {
         assert!(env.iter().any(|e| e.name == "KRABKA_OTLP_ENDPOINT"));
         // Optional knobs are absent.
         for unset in [
+            "KRABKA_GCP_PROJECT_ID",
             "KRABKA_OTLP_PROTOCOL",
             "KRABKA_OTLP_SAMPLE_RATIO",
             "OTEL_SERVICE_NAME",
@@ -6343,6 +6350,7 @@ mod tests {
         for never in [
             "KRABKA_OTLP_ENABLED",
             "KRABKA_OTLP_ENDPOINT",
+            "KRABKA_GCP_PROJECT_ID",
             "KRABKA_OTLP_PROTOCOL",
             "KRABKA_OTLP_SAMPLE_RATIO",
             "OTEL_SERVICE_NAME",

@@ -15,6 +15,7 @@ pub mod metrics;
 pub mod network_policy;
 pub mod rebalance;
 pub mod schema_registry;
+pub mod telemetry;
 pub mod topic;
 pub mod user;
 
@@ -46,6 +47,7 @@ pub use schema_registry::{
     SchemaRegistryKafkaClient, SchemaRegistryRuntime, SchemaRegistrySpec, SchemaRegistryStatus,
     SchemaRegistryTls, TlsClientAuth,
 };
+pub use telemetry::TelemetrySpec;
 pub use topic::{KafkaTopic, KafkaTopicSpec, KafkaTopicStatus};
 // The cluster-level `Authorization` / `SimpleAuthorization` on
 // `KafkaSpec` (above) take the unqualified re-export names. The per-user

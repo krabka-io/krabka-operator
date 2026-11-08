@@ -4592,7 +4592,7 @@ mod toml_rendering_tests {
         let rs = parsed.remote_storage.expect("[remote_storage] round-trips");
         let s3 = rs.s3.expect("[remote_storage.s3] round-trips");
         check!(s3.bucket == "krabka-tier");
-        check!(s3.region == "us-east-1");
+        check!(s3.region.as_deref() == Some("us-east-1"));
         check!(s3.prefix.as_deref() == Some("cluster-a"));
         check!(s3.endpoint.as_deref() == Some("http://minio.svc:9000"));
         check!(s3.allow_http);
@@ -4661,7 +4661,7 @@ mod toml_rendering_tests {
             .s3
             .expect("[remote_storage.s3] round-trips");
         assert!(s3.bucket == "b");
-        assert!(s3.region == "r");
+        assert!(s3.region.as_deref() == Some("r"));
     }
 
     /// The render must escape the reserved TOML metacharacters `"` and

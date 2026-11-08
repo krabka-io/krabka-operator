@@ -261,6 +261,10 @@ spec:
                 description: "OpenTelemetry / observability configuration. When absent,\nthe gateway exports no telemetry."
                 nullable: true
                 properties:
+                  gcpProjectId:
+                    description: "Google Cloud project id for Cloud Logging trace correlation. The\noperator renders it as `KRABKA_GCP_PROJECT_ID`. When it is set and\n`otlpEndpoint` turns OTLP export on, each stdout log entry written\ninside a traced span carries `logging.googleapis.com/trace` as\n`projects/<project id>/traces/<trace id>`,\n`logging.googleapis.com/spanId` and\n`logging.googleapis.com/trace_sampled`, so Cloud Logging links the\nentry to its trace. Unset, log entries carry no trace keys."
+                    nullable: true
+                    type: string
                   otlpEndpoint:
                     description: "OTLP exporter endpoint URL, for example\n`http://otel-collector.observability.svc:4317`."
                     nullable: true

@@ -17,6 +17,7 @@ pub(crate) mod metrics;
 pub(crate) mod network_policy;
 pub mod rebalance;
 pub mod schema_registry;
+pub mod telemetry;
 pub mod topic;
 pub mod user;
 pub mod user_delegation_token;

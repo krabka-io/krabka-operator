@@ -106,6 +106,10 @@ allow-git = [
     "https://github.com/krabka-io/krabka-schema-registry",
     "https://github.com/krabka-io/krabka-streams-rs",
     "https://github.com/testcontainers/testcontainers-rs-modules-community",
+    # rustix with `fs::sync_file_range` (bytecodealliance/rustix#1718), until a
+    # release carries it. krabka-broker's `log_write_back` imports it. See the
+    # `[patch.crates-io]` entry in Cargo.toml.
+    "https://github.com/robot-head/rustix",
 ]
 
 [[licenses.clarify]]

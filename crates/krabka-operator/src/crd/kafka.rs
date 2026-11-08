@@ -1328,6 +1328,16 @@ pub struct OtlpTracing {
     )]
     #[schemars(with = "Option<String>")]
     pub timeout: Option<Time>,
+    /// Optional Google Cloud project id for Cloud Logging trace correlation.
+    /// The operator renders it as `KRABKA_GCP_PROJECT_ID`. When it is set,
+    /// each stdout log entry written inside a traced span carries
+    /// `logging.googleapis.com/trace` as
+    /// `projects/<project id>/traces/<trace id>`,
+    /// `logging.googleapis.com/spanId` and
+    /// `logging.googleapis.com/trace_sampled`, so Cloud Logging links the
+    /// entry to its trace. An unset field leaves the trace keys off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gcp_project_id: Option<String>,
 }
 
 /// OTLP wire protocol selector. It has the same shape as the broker's
@@ -1361,7 +1371,8 @@ impl Tracing {
     ///
     /// Fails when `type=Otlp` is missing the `otlp` block, when
     /// `otlp.endpoint` is empty, when `sampleRatio` is outside
-    /// `[0.0, 1.0]`, or when `timeout` is not positive.
+    /// `[0.0, 1.0]`, when `serviceName` or `gcpProjectId` is set but empty,
+    /// or when `timeout` is not positive.
     pub fn validate(&self) -> Result<(), String> {
         match (self.kind, &self.otlp) {
             (TracingType::Otlp, None) => {
@@ -1380,6 +1391,11 @@ impl Tracing {
                     && s.trim().is_empty()
                 {
                     return Err("otlp.serviceName, when set, must be non-empty".into());
+                }
+                if let Some(project) = otlp.gcp_project_id.as_deref()
+                    && project.trim().is_empty()
+                {
+                    return Err("otlp.gcpProjectId, when set, must be non-empty".into());
                 }
                 if let Some(timeout) = otlp.timeout
                     && (timeout.secs_f64() <= 0.0
@@ -1581,4 +1597,53 @@ pub struct KafkaCondition {
     pub message: String,
     /// RFC3339 timestamp.
     pub last_transition_time: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use assert2::assert;
+
+    use super::{OtlpTracing, Tracing, TracingType};
+
+    fn otlp_tracing(otlp: OtlpTracing) -> Tracing {
+        Tracing {
+            kind: TracingType::Otlp,
+            otlp: Some(otlp),
+        }
+    }
+
+    fn endpoint_only() -> OtlpTracing {
+        OtlpTracing {
+            endpoint: "http://otel:4317".into(),
+            protocol: None,
+            sample_ratio: None,
+            service_name: None,
+            timeout: None,
+            gcp_project_id: None,
+        }
+    }
+
+    #[test]
+    fn tracing_validate_checks_gcp_project_id() {
+        for (case, gcp_project_id, want) in [
+            ("unset", None, Ok(())),
+            ("set", Some("demo-project"), Ok(())),
+            (
+                "empty",
+                Some(""),
+                Err("otlp.gcpProjectId, when set, must be non-empty".to_owned()),
+            ),
+            (
+                "blank",
+                Some("  "),
+                Err("otlp.gcpProjectId, when set, must be non-empty".to_owned()),
+            ),
+        ] {
+            let tracing = otlp_tracing(OtlpTracing {
+                gcp_project_id: gcp_project_id.map(str::to_owned),
+                ..endpoint_only()
+            });
+            assert!(tracing.validate() == want, "case {case}");
+        }
+    }
 }

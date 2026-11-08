@@ -163,7 +163,12 @@ pub fn init_tracing(filter: &str) {
     let env = tracing_subscriber::EnvFilter::try_new(filter)
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     let _ = tracing_subscriber::registry()
-        .with(krabka_logfmt::layer(env, std::io::stdout))
+        .with(
+            krabka_logfmt::layer()
+                .filter(env)
+                .writer(std::io::stdout)
+                .call(),
+        )
         .try_init();
 }
 
