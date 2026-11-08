@@ -43,6 +43,7 @@ use crate::{
         common::{
             self, FIELD_MANAGER, ReconcileError, apply_object, condition, owner_ref, patch_status,
         },
+        telemetry::{telemetry_env, validate_telemetry},
         topic::internal_listener_bootstrap,
     },
     crd::{
@@ -515,6 +516,9 @@ fn validate_config(spec: &SchemaRegistrySpec) -> Result<(), String> {
     {
         return Err("spec.authorization.aclRefresh: must be positive".into());
     }
+    if let Some(telemetry) = &spec.telemetry {
+        validate_telemetry(telemetry)?;
+    }
     Ok(())
 }
 
@@ -637,6 +641,9 @@ fn render_statefulset(
         json!({ "name": "SCHEMA_REGISTRY_ADVERTISED_URL", "value": advertised }),
     ];
     env.extend(extra_env);
+    if let Some(telemetry) = obj.spec.telemetry.as_ref() {
+        env.extend(telemetry_env(telemetry));
+    }
     let sts = serde_json::from_value(json!({
         "metadata": {
             "name": statefulset_name(&name),
@@ -1041,7 +1048,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::crd::SchemaRegistryHealthChecks;
+    use crate::crd::{SchemaRegistryHealthChecks, TelemetrySpec};
 
     fn registry_fixture() -> SchemaRegistry {
         let mut registry = SchemaRegistry::new(
@@ -1061,6 +1068,7 @@ mod tests {
                 authentication: None,
                 authorization: None,
                 resources: None,
+                telemetry: None,
             },
         );
         registry.metadata.namespace = Some("kafka".into());
@@ -1243,6 +1251,91 @@ mod tests {
         ] {
             let spec: SchemaRegistrySpec = serde_json::from_value(value.clone()).unwrap();
             assert!(validate_config(&spec).is_ok(), "rejected valid {value}");
+        }
+    }
+
+    /// The container env of the rendered registry pod, as `(name, value)`
+    /// pairs for the literal entries.
+    fn literal_env(registry: &SchemaRegistry) -> Vec<(String, String)> {
+        let sts = render_statefulset(registry, "boot:9092", "img:1", None).unwrap();
+        let pod = sts.spec.unwrap().template.spec.unwrap();
+        pod.containers[0]
+            .env
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|var| var.value.map(|value| (var.name, value)))
+            .collect()
+    }
+
+    #[test]
+    fn telemetry_renders_as_otlp_and_gcp_project_env() {
+        let full = TelemetrySpec {
+            otlp_endpoint: Some("http://otel:4317".into()),
+            otlp_protocol: Some("http".into()),
+            sample_ratio: Some(0.25),
+            gcp_project_id: Some("krabka-prod".into()),
+        };
+        let endpoint_only = TelemetrySpec {
+            otlp_endpoint: Some("http://otel:4317".into()),
+            ..TelemetrySpec::default()
+        };
+        let pair = |name: &str, value: &str| (name.to_owned(), value.to_owned());
+        for (case, telemetry, expected) in [
+            ("telemetry unset", None, vec![]),
+            (
+                "every field set",
+                Some(full),
+                vec![
+                    pair("KRABKA_OTLP_ENABLED", "true"),
+                    pair("KRABKA_OTLP_ENDPOINT", "http://otel:4317"),
+                    pair("KRABKA_GCP_PROJECT_ID", "krabka-prod"),
+                    pair("KRABKA_OTLP_PROTOCOL", "http/protobuf"),
+                    pair("KRABKA_OTLP_SAMPLE_RATIO", "0.25"),
+                ],
+            ),
+            (
+                "endpoint only",
+                Some(endpoint_only),
+                vec![
+                    pair("KRABKA_OTLP_ENABLED", "true"),
+                    pair("KRABKA_OTLP_ENDPOINT", "http://otel:4317"),
+                ],
+            ),
+        ] {
+            let mut registry = registry_fixture();
+            registry.spec.telemetry = telemetry;
+            let telemetry_env: Vec<(String, String)> = literal_env(&registry)
+                .into_iter()
+                .filter(|(name, _)| name.starts_with("KRABKA_"))
+                .collect();
+            assert!(telemetry_env == expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn telemetry_validation_rejects_invalid_fields() {
+        for (telemetry, path) in [
+            (
+                serde_json::json!({"otlpEndpoint": ""}),
+                "spec.telemetry.otlpEndpoint",
+            ),
+            (
+                serde_json::json!({"gcpProjectId": ""}),
+                "spec.telemetry.gcpProjectId",
+            ),
+            (
+                serde_json::json!({"otlpProtocol": "udp"}),
+                "spec.telemetry.otlpProtocol",
+            ),
+        ] {
+            let spec: SchemaRegistrySpec = serde_json::from_value(serde_json::json!({
+                "replicas": 1,
+                "telemetry": telemetry,
+            }))
+            .unwrap();
+            let error = validate_config(&spec).expect_err("reject invalid telemetry");
+            assert!(error.contains(path), "got: {error}");
         }
     }
 }

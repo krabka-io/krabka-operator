@@ -71,6 +71,7 @@ use crate::{
             self, ReconcileError, apply_object, condition, millis_u64, owner_ref,
             parent_version_gate, patch_status, read_pem_key, secs_u64,
         },
+        telemetry::{telemetry_env, validate_telemetry},
     },
     crd::{
         Kafka, KafkaCondition, KafkaGrpcGateway, KafkaGrpcGatewayStatus,
@@ -214,23 +215,8 @@ fn deployment(
         // `client.id` = the pod name (distinct per replica).
         value_env("KRABKA_GATEWAY_CLIENT_ID", "$(POD_NAME)"),
     ];
-    if let Some(t) = gw.spec.telemetry.as_ref() {
-        if let Some(ep) = t.otlp_endpoint.as_deref() {
-            env.push(value_env("KRABKA_OTLP_ENABLED", "true"));
-            env.push(value_env("KRABKA_OTLP_ENDPOINT", ep));
-        }
-        if let Some(project) = t.gcp_project_id.as_deref() {
-            env.push(value_env("KRABKA_GCP_PROJECT_ID", project));
-        }
-        if let Some(p) = t.otlp_protocol.as_deref() {
-            // The gateway's telemetry reads `OTEL_EXPORTER_OTLP_PROTOCOL`-style
-            // values; map the CRD's `grpc`/`http` onto them.
-            let proto = if p == "http" { "http/protobuf" } else { "grpc" };
-            env.push(value_env("KRABKA_OTLP_PROTOCOL", proto));
-        }
-        if let Some(r) = t.sample_ratio {
-            env.push(value_env("KRABKA_OTLP_SAMPLE_RATIO", r.to_string()));
-        }
+    if let Some(telemetry) = gw.spec.telemetry.as_ref() {
+        env.extend(telemetry_env(telemetry));
     }
 
     let volumes = json!([
@@ -1316,24 +1302,7 @@ fn validate_config(spec: &crate::crd::grpc_gateway::KafkaGrpcGatewaySpec) -> Res
     }
     validate_outbound_config(spec)?;
     if let Some(telemetry) = &spec.telemetry {
-        nonempty!(
-            telemetry.otlp_endpoint.as_deref(),
-            "spec.telemetry.otlpEndpoint"
-        );
-        nonempty!(
-            telemetry.gcp_project_id.as_deref(),
-            "spec.telemetry.gcpProjectId"
-        );
-        if let Some(protocol) = telemetry.otlp_protocol.as_deref()
-            && !matches!(protocol, "grpc" | "http")
-        {
-            return Err("spec.telemetry.otlpProtocol must be grpc or http".into());
-        }
-        if let Some(ratio) = telemetry.sample_ratio
-            && (!ratio.is_finite() || !(0.0..=1.0).contains(&ratio))
-        {
-            return Err("spec.telemetry.sampleRatio must be finite and between 0 and 1".into());
-        }
+        validate_telemetry(telemetry)?;
     }
     Ok(())
 }
@@ -1833,10 +1802,13 @@ mod tests {
     use krabka_units::{millis, secs};
 
     use super::*;
-    use crate::crd::grpc_gateway::{
-        AllowedTargetSpec, DedupSpec, GatewayAuthzSpec, GatewayBearerSpec, GatewayHealthChecks,
-        GatewaySchemaRegistrySpec, GatewayTlsSpec, GatewayTuning, InboundWebhookSpec,
-        KafkaGrpcGatewaySpec, OutboundSubscriptionSpec, SecretKeyRef, TelemetrySpec,
+    use crate::crd::{
+        TelemetrySpec,
+        grpc_gateway::{
+            AllowedTargetSpec, DedupSpec, GatewayAuthzSpec, GatewayBearerSpec, GatewayHealthChecks,
+            GatewaySchemaRegistrySpec, GatewayTlsSpec, GatewayTuning, InboundWebhookSpec,
+            KafkaGrpcGatewaySpec, OutboundSubscriptionSpec, SecretKeyRef,
+        },
     };
 
     fn empty_spec() -> KafkaGrpcGatewaySpec {

@@ -285,6 +285,30 @@ spec:
                 format: int32
                 nullable: true
                 type: integer
+              telemetry:
+                description: "OpenTelemetry configuration. The operator renders it as the\nregistry's `KRABKA_OTLP_*` and `KRABKA_GCP_PROJECT_ID` environment.\nWhen absent, the registry exports no telemetry."
+                nullable: true
+                properties:
+                  gcpProjectId:
+                    description: "Google Cloud project id for Cloud Logging trace correlation. The\noperator renders it as `KRABKA_GCP_PROJECT_ID`. When it is set and\n`otlpEndpoint` turns OTLP export on, each stdout log entry written\ninside a traced span carries `logging.googleapis.com/trace` as\n`projects/<project id>/traces/<trace id>`,\n`logging.googleapis.com/spanId` and\n`logging.googleapis.com/trace_sampled`, so Cloud Logging links the\nentry to its trace. Unset, log entries carry no trace keys."
+                    nullable: true
+                    type: string
+                  otlpEndpoint:
+                    description: "OTLP exporter endpoint URL, for example\n`http://otel-collector.observability.svc:4317`."
+                    nullable: true
+                    type: string
+                  otlpProtocol:
+                    description: OTLP exporter protocol. One of `grpc` or `http`. Default `grpc`.
+                    nullable: true
+                    type: string
+                  sampleRatio:
+                    description: "Fraction of traces to sample, in the range `[0.0, 1.0]`. Default\n1.0, which samples all traces."
+                    format: double
+                    maximum: 1.0
+                    minimum: 0.0
+                    nullable: true
+                    type: number
+                type: object
               tls:
                 description: Server TLS for the HTTPS REST surface. `None` means plain HTTP.
                 nullable: true

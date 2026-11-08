@@ -12,6 +12,8 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::telemetry::TelemetrySpec;
+
 #[derive(CustomResource, Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[kube(
     group = "krabka.io",
@@ -89,6 +91,12 @@ pub struct SchemaRegistrySpec {
     /// Pod resource requirements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resources: Option<k8s_openapi::api::core::v1::ResourceRequirements>,
+
+    /// OpenTelemetry configuration. The operator renders it as the
+    /// registry's `KRABKA_OTLP_*` and `KRABKA_GCP_PROJECT_ID` environment.
+    /// When absent, the registry exports no telemetry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<TelemetrySpec>,
 }
 
 /// Schema Registry broker interaction and store-default policy.

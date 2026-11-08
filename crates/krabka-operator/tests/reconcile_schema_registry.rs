@@ -45,6 +45,7 @@ fn sr(name: &str, cluster: Option<&str>) -> SchemaRegistry {
             authentication: None,
             authorization: None,
             resources: None,
+            telemetry: None,
         },
     );
     cr.metadata.namespace = Some(NS.into());
