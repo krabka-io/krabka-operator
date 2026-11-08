@@ -1257,6 +1257,10 @@ spec:
                       endpoint:
                         description: "Required. OTLP collector endpoint in the form `scheme://host:port`.\nThe operator renders it as `KRABKA_OTLP_ENDPOINT`. A set field also\nsets `KRABKA_OTLP_ENABLED=true`."
                         type: string
+                      gcpProjectId:
+                        description: "Optional Google Cloud project id for Cloud Logging trace correlation.\nThe operator renders it as `KRABKA_GCP_PROJECT_ID`. When it is set,\neach stdout log entry written inside a traced span carries\n`logging.googleapis.com/trace` as\n`projects/<project id>/traces/<trace id>`,\n`logging.googleapis.com/spanId` and\n`logging.googleapis.com/trace_sampled`, so Cloud Logging links the\nentry to its trace. An unset field leaves the trace keys off."
+                        nullable: true
+                        type: string
                       protocol:
                         description: "OTLP wire protocol selector. It has the same shape as the broker's\ninternal `OtlpProtocol` enum and the `OTEL_EXPORTER_OTLP_PROTOCOL` spec\nvalues."
                         enum:

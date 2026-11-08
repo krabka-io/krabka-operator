@@ -219,6 +219,9 @@ fn deployment(
             env.push(value_env("KRABKA_OTLP_ENABLED", "true"));
             env.push(value_env("KRABKA_OTLP_ENDPOINT", ep));
         }
+        if let Some(project) = t.gcp_project_id.as_deref() {
+            env.push(value_env("KRABKA_GCP_PROJECT_ID", project));
+        }
         if let Some(p) = t.otlp_protocol.as_deref() {
             // The gateway's telemetry reads `OTEL_EXPORTER_OTLP_PROTOCOL`-style
             // values; map the CRD's `grpc`/`http` onto them.
@@ -1317,6 +1320,10 @@ fn validate_config(spec: &crate::crd::grpc_gateway::KafkaGrpcGatewaySpec) -> Res
             telemetry.otlp_endpoint.as_deref(),
             "spec.telemetry.otlpEndpoint"
         );
+        nonempty!(
+            telemetry.gcp_project_id.as_deref(),
+            "spec.telemetry.gcpProjectId"
+        );
         if let Some(protocol) = telemetry.otlp_protocol.as_deref()
             && !matches!(protocol, "grpc" | "http")
         {
@@ -2061,6 +2068,7 @@ mod tests {
             otlp_endpoint: Some("http://otel:4317".into()),
             otlp_protocol: Some("http".into()),
             sample_ratio: Some(0.5),
+            gcp_project_id: Some("demo-project".into()),
         });
         let dep = deployment(&gw, "demo", "img:1", "boot:9092", "sni").unwrap();
         let env = dep
@@ -2081,10 +2089,47 @@ mod tests {
         for (name, want) in [
             ("KRABKA_OTLP_ENABLED", "true"),
             ("KRABKA_OTLP_ENDPOINT", "http://otel:4317"),
+            ("KRABKA_GCP_PROJECT_ID", "demo-project"),
             ("KRABKA_OTLP_PROTOCOL", "http/protobuf"),
             ("KRABKA_OTLP_SAMPLE_RATIO", "0.5"),
         ] {
             assert!(by_name(name).as_deref() == Some(want), "env {name}");
+        }
+    }
+
+    #[test]
+    fn deployment_gcp_project_id_env_follows_telemetry() {
+        let otlp_only = TelemetrySpec {
+            otlp_endpoint: Some("http://otel:4317".into()),
+            ..Default::default()
+        };
+        let with_project = TelemetrySpec {
+            gcp_project_id: Some("demo-project".into()),
+            ..otlp_only.clone()
+        };
+        for (case, telemetry, want) in [
+            ("project set", Some(with_project), Some("demo-project")),
+            ("project unset", Some(otlp_only), None),
+            ("telemetry unset", None, None),
+        ] {
+            let mut gw = gateway_fixture("gw", "demo");
+            gw.spec.telemetry = telemetry;
+            let env = deployment(&gw, "demo", "img:1", "boot:9092", "sni")
+                .unwrap()
+                .spec
+                .unwrap()
+                .template
+                .spec
+                .unwrap()
+                .containers
+                .remove(0)
+                .env
+                .unwrap();
+            let got = env
+                .iter()
+                .find(|e| e.name == "KRABKA_GCP_PROJECT_ID")
+                .and_then(|e| e.value.as_deref());
+            assert!(got == want, "case {case}");
         }
     }
 
@@ -2746,6 +2791,8 @@ schema_format = "json"
                 "name": "s", "sourceTopics": ["t"], "targetUrl": "https://example.com",
                 "baseBackoff": "2ms", "maxBackoff": "1ms"
             }]}),
+            serde_json::json!({"telemetry": {"otlpEndpoint": ""}}),
+            serde_json::json!({"telemetry": {"gcpProjectId": ""}}),
         ];
         for value in cases {
             let spec: KafkaGrpcGatewaySpec = serde_json::from_value(value.clone()).unwrap();

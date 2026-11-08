@@ -542,6 +542,17 @@ pub struct TelemetrySpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 1.0))]
     pub sample_ratio: Option<f64>,
+
+    /// Google Cloud project id for Cloud Logging trace correlation. The
+    /// operator renders it as `KRABKA_GCP_PROJECT_ID`. When it is set and
+    /// `otlpEndpoint` turns OTLP export on, each stdout log entry written
+    /// inside a traced span carries `logging.googleapis.com/trace` as
+    /// `projects/<project id>/traces/<trace id>`,
+    /// `logging.googleapis.com/spanId` and
+    /// `logging.googleapis.com/trace_sampled`, so Cloud Logging links the
+    /// entry to its trace. Unset, log entries carry no trace keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gcp_project_id: Option<String>,
 }
 
 /// Status reported back by the controller onto each `KafkaGrpcGateway`.
@@ -765,6 +776,7 @@ mod tests {
                     otlp_endpoint: Some("http://otel:4317".into()),
                     otlp_protocol: Some("grpc".into()),
                     sample_ratio: Some(1.0),
+                    gcp_project_id: Some("demo-project".into()),
                 }),
             },
         );
@@ -774,6 +786,7 @@ mod tests {
             "\"targetTopic\":\"raw-orders\"",
             "\"targetUrl\":\"https://example.com/hook\"",
             "\"otlpEndpoint\":\"http://otel:4317\"",
+            "\"gcpProjectId\":\"demo-project\"",
         ] {
             assert!(json.contains(want), "case {want:?}; got: {json}");
         }
