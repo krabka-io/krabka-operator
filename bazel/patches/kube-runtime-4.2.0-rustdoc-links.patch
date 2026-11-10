@@ -1,0 +1,49 @@
+# Documentation-only fix for kube-runtime 4.2.0.
+# Lookup documentation is inherited by local Resource implementations.
+# Use published targets so relative and Rust-style Markdown URLs do not escape
+# into the generated consumer documentation. Correct the api_version typo.
+--- a/src/reflector/object_ref.rs
++++ b/src/reflector/object_ref.rs
+@@ -19,33 +19,33 @@
+     /// This is equivalent to [`Resource::DynamicType`].
+     type DynamicType;
+ 
+-    /// The [kind](Resource::kind) for this object.
++    /// The [kind](https://docs.rs/kube-core/4.2.0/kube_core/trait.Resource.html#tymethod.kind) for this object.
+     fn kind(dyntype: &Self::DynamicType) -> Cow<'_, str>;
+ 
+-    /// The [group](Resource::group) for this object.
++    /// The [group](https://docs.rs/kube-core/4.2.0/kube_core/trait.Resource.html#tymethod.group) for this object.
+     fn group(dyntype: &Self::DynamicType) -> Cow<'_, str>;
+ 
+-    /// The [version](Resource::version) for this object.
++    /// The [version](https://docs.rs/kube-core/4.2.0/kube_core/trait.Resource.html#tymethod.version) for this object.
+     fn version(dyntype: &Self::DynamicType) -> Cow<'_, str>;
+ 
+-    /// The [apiVersion](Resource::_version) for this object.
++    /// The [apiVersion](https://docs.rs/kube-core/4.2.0/kube_core/trait.Resource.html#method.api_version) for this object.
+     fn api_version(dyntype: &Self::DynamicType) -> Cow<'_, str> {
+         api_version_from_group_version(Self::group(dyntype), Self::version(dyntype))
+     }
+ 
+-    /// The [plural](Resource::plural) for this object.
++    /// The [plural](https://docs.rs/kube-core/4.2.0/kube_core/trait.Resource.html#tymethod.plural) for this object.
+     fn plural(dyntype: &Self::DynamicType) -> Cow<'_, str>;
+ 
+-    /// The [name](ObjectMeta#structfield.name) of the object.
++    /// The [name](https://docs.rs/k8s-openapi/0.28.0/k8s_openapi/apimachinery/pkg/apis/meta/v1/struct.ObjectMeta.html#structfield.name) of the object.
+     fn name(&self) -> Option<Cow<'_, str>>;
+ 
+-    /// The [namespace](ObjectMeta#structfield.namespace) of the object.
++    /// The [namespace](https://docs.rs/k8s-openapi/0.28.0/k8s_openapi/apimachinery/pkg/apis/meta/v1/struct.ObjectMeta.html#structfield.namespace) of the object.
+     fn namespace(&self) -> Option<Cow<'_, str>>;
+ 
+-    /// The [resource version](ObjectMeta#structfield.resource_version) of the object.
++    /// The [resource version](https://docs.rs/k8s-openapi/0.28.0/k8s_openapi/apimachinery/pkg/apis/meta/v1/struct.ObjectMeta.html#structfield.resource_version) of the object.
+     fn resource_version(&self) -> Option<Cow<'_, str>>;
+ 
+-    /// The [UID](ObjectMeta#structfield.uid) of the object.
++    /// The [UID](https://docs.rs/k8s-openapi/0.28.0/k8s_openapi/apimachinery/pkg/apis/meta/v1/struct.ObjectMeta.html#structfield.uid) of the object.
+     fn uid(&self) -> Option<Cow<'_, str>>;
+ 
+     /// Constructs an [`ObjectRef`] for this object.
