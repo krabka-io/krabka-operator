@@ -1,6 +1,7 @@
 name: ci
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
   schedule:
@@ -288,3 +289,14 @@ jobs:
           disk-cache: ${{ github.workflow }}-mutants
           repository-cache: true
       - run: bazel test ${{ matrix.crate.target }}
+
+  gate:
+    name: gate
+    if: always() && github.event_name != 'schedule'
+    needs: [kind-lifecycle, ci, helm, crd-drift, coverage, docs]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: krabka-io/tooling/actions/gate@a42cceef18200f4f282ae5a090856f63125a12ff
+        with:
+          results: ${{ toJSON(needs) }}
