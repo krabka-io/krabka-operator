@@ -2,12 +2,12 @@ apiVersion: v2
 name: krabka-operator
 description: Kubernetes operator for Krabka clusters
 type: application
-version: 0.1.0
+version: 0.1.1
 # appVersion tracks the crate release. The packager overrides both version and
 # appVersion from the workspace Cargo.toml: see the `helm package` call in
 # packaging/kind-lifecycle.sh. The numbers below are the local/dev default
-# only, so there is no need to hand-edit them on release.
-appVersion: "0.3.6"
+# only; keep appVersion aligned for installs from a checkout.
+appVersion: "1.0.3"
 kubeVersion: ">= 1.28.0-0"
 home: https://github.com/krabka-io/krabka-operator
 sources:
