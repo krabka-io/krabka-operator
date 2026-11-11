@@ -1,3 +1,6 @@
+# Prefer the verified shared mirror for the exact unavailable Ubuntu build input.
+common --downloader_config=bazel/downloader.cfg
+
 # krabka-broker Bazel configuration.
 #
 # Cargo remains the dependency source of truth; Bazel reads the same
